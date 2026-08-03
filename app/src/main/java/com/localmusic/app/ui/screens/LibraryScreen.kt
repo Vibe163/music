@@ -384,9 +384,9 @@ private fun SongList(
             contentType = { _, _ -> "song" }
         ) { _, song ->
             val isActive = song.id == currentPlayingSongId
-            val onClick = remember(song.id) { { onSongClick(song.id) } }
-            val onFavClick = remember(song.id, song.favorite) { { onToggleFavorite(song) } }
-            val menuItems = remember(song.id) {
+            val onClick = { onSongClick(song.id) }
+            val onFavClick = { onToggleFavorite(song) }
+            val menuItems = remember(song) {
                 listOf(
                     SongMenuItem("分享") { onShareSong(song) },
                     SongMenuItem("编辑信息") { onEditSong(song) },

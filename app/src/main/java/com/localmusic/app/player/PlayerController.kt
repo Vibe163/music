@@ -3,6 +3,7 @@ package com.localmusic.app.player
 import android.content.ComponentName
 import android.content.Context
 import android.media.AudioManager
+import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -33,6 +34,10 @@ data class PlayerUiState(
 
 class PlayerController(private val context: Context) {
 
+    companion object {
+        private const val TAG = "PlayerController"
+    }
+
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
     private var songsByMediaId: Map<String, Song> = emptyMap()
@@ -59,10 +64,60 @@ class PlayerController(private val context: Context) {
     private var wasPlaying = false
     private var lastSongCompletedId: Long = -1L
 
+    /**
+     * 更新播放队列中某首歌的数据（改名后同步刷新）。
+     *
+     * 兜底机制：
+     *  1. 更新 songsByMediaId 缓存 + UI 状态中的 queue / currentSong
+     *  2. 同步 ExoPlayer 队列中的 MediaItem URI——如果 URI 变化（改名），
+     *     用 replaceMediaItem 替换，正在播放的歌曲自动用新路径续播
+     */
     fun updateSongInQueue(updated: Song) {
+        val mediaId = updated.id.toString()
+        // 先取旧歌曲数据，用于判断 URI 是否变化
+        val oldSong = songsByMediaId[mediaId]
+        val uriChanged = oldSong == null || oldSong.uri != updated.uri
+
         songsByMediaId = songsByMediaId.toMutableMap().apply {
-            put(updated.id.toString(), updated)
+            put(mediaId, updated)
         }
+
+        // 同步 ExoPlayer 队列中的 MediaItem URI（改名后关键）
+        val controller = mediaController
+        if (controller != null && uriChanged) {
+            for (index in 0 until controller.mediaItemCount) {
+                val item = controller.getMediaItemAt(index)
+                if (item.mediaId == mediaId) {
+                    Log.i(TAG, "updateSongInQueue: URI 变化 index=$index old=${oldSong?.uri} new=${updated.uri}")
+                    val isCurrent = index == controller.currentMediaItemIndex
+                    val wasPlaying = controller.isPlaying
+                    val position = if (isCurrent) controller.currentPosition else 0L
+
+                    val newItem = MediaItem.Builder()
+                        .setMediaId(mediaId)
+                        .setUri(updated.uri)
+                        .setMediaMetadata(
+                            androidx.media3.common.MediaMetadata.Builder()
+                                .setTitle(updated.title)
+                                .setArtist(updated.artist)
+                                .setAlbumTitle(updated.album)
+                                .build()
+                        )
+                        .build()
+                    controller.replaceMediaItem(index, newItem)
+                    if (isCurrent && wasPlaying) {
+                        // 正在播放的歌曲改名后用新路径续播（保持播放位置）
+                        controller.prepare()
+                        controller.seekTo(position)
+                        controller.play()
+                        Log.i(TAG, "updateSongInQueue: 已用新 URI 续播 position=$position")
+                    }
+                    break
+                }
+            }
+        }
+
+        // 更新 UI 状态
         val current = _uiState.value.currentSong
         if (current?.id == updated.id) {
             _uiState.value = _uiState.value.copy(currentSong = updated)
@@ -105,6 +160,27 @@ class PlayerController(private val context: Context) {
                 syncFromPlayer()
             }
         }
+
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            val current = _uiState.value.currentSong
+            Log.e(TAG, "播放错误: ${error.message}, song=${current?.title}, uri=${current?.uri}")
+            Log.e(TAG, "错误码: ${error.errorCode}, 原因: ${error.cause?.javaClass?.simpleName}")
+
+            // 无论是否在播放，都强制停止并清空队列，防止自动跳到下一首
+            val controller = mediaController
+            if (controller != null) {
+                Log.i(TAG, "播放错误后强制 stop + clearMediaItems，不自动切歌")
+                controller.stop()
+                controller.clearMediaItems()
+            }
+            wasPlaying = false
+            // 通知 UI 更新：播放失败后保持 currentSong 显示（用户可见），但 isPlaying=false
+            _uiState.value = _uiState.value.copy(
+                isPlaying = false,
+                currentSong = _uiState.value.currentSong
+            )
+            _positionMs.value = 0L
+        }
     }
 
     suspend fun connect() {
@@ -128,17 +204,34 @@ class PlayerController(private val context: Context) {
 
     fun playSongs(songs: List<Song>, startIndex: Int = 0) {
         if (songs.isEmpty()) return
-        val controller = mediaController ?: return
+        val controller = mediaController ?: run {
+            Log.e(TAG, "playSongs: mediaController 未连接")
+            return
+        }
+        val song = songs.getOrNull(startIndex)
+        Log.i(TAG, "playSongs: startIndex=$startIndex, totalSongs=${songs.size}, uri=${song?.uri}")
+
         songsByMediaId = songs.associateBy { it.id.toString() }
-        val mediaItems = songs.map { song ->
+
+        // 关键：完全重置播放器，清除任何残留状态或错误
+        // 即使 ExoPlayer 处于 STATE_ERROR / STATE_IDLE，stop + clearMediaItems 也能将其重置
+        // 后续 setMediaItems + prepare 会重新创建播放管线，等效于"异常状态重建"
+        val hadError = controller.playerError != null
+        if (hadError) {
+            Log.w(TAG, "playSongs: 检测到播放器处于错误状态，执行重建")
+        }
+        controller.stop()
+        controller.clearMediaItems()
+
+        val mediaItems = songs.map { s ->
             MediaItem.Builder()
-                .setMediaId(song.id.toString())
-                .setUri(song.uri)
+                .setMediaId(s.id.toString())
+                .setUri(s.uri)
                 .setMediaMetadata(
                     androidx.media3.common.MediaMetadata.Builder()
-                        .setTitle(song.title)
-                        .setArtist(song.artist)
-                        .setAlbumTitle(song.album)
+                        .setTitle(s.title)
+                        .setArtist(s.artist)
+                        .setAlbumTitle(s.album)
                         .build()
                 )
                 .build()
@@ -147,6 +240,7 @@ class PlayerController(private val context: Context) {
         controller.setMediaItems(mediaItems, startIndex.coerceIn(0, songs.lastIndex), 0L)
         controller.prepare()
         controller.play()
+        Log.i(TAG, "playSongs: 已调用 setMediaItems + prepare + play, state=${controller.playbackState}, hadError=$hadError")
         syncFromPlayer()
     }
 
@@ -253,6 +347,7 @@ class PlayerController(private val context: Context) {
         val queue = buildQueue(controller)
         val currentIndex = controller.currentMediaItemIndex.coerceAtLeast(0)
         val currentSong = queue.getOrNull(currentIndex)
+        Log.d(TAG, "syncFromPlayer: state=${controller.playbackState}, isPlaying=${controller.isPlaying}, index=$currentIndex, song=${currentSong?.title}, error=${controller.playerError?.message}")
         _uiState.value = PlayerUiState(
             currentSong = currentSong,
             isPlaying = controller.isPlaying,

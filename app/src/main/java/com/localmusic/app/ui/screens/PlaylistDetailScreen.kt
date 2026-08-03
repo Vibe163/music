@@ -163,10 +163,9 @@ fun PlaylistDetailScreen(
                         key = { _, s -> s.id },
                         contentType = { _, _ -> "song" }
                     ) { index, song ->
-                        val onClick = remember(index) { { onSongClick(index) } }
-                        // 关键：把 song.favorite 加入 key，确保收藏状态变化后 lambda 闭包里的 song 是最新的
-                        val onFavClick = remember(song.id, song.favorite) { { onToggleFavorite(song) } }
-                        val menuItems = remember(song.id, song.title, song.artist) {
+                        val onClick = { onSongClick(index) }
+                        val onFavClick = { onToggleFavorite(song) }
+                        val menuItems = remember(song) {
                             listOf(
                                 SongMenuItem("分享") { onShareSong(song) },
                                 SongMenuItem("编辑信息") { onEditSong(song) },

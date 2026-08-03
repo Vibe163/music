@@ -2,6 +2,7 @@ package com.localmusic.app.data.repository
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import com.localmusic.app.data.importer.ImportResult
 import com.localmusic.app.data.importer.MusicImporter
 import com.localmusic.app.data.importer.MusicMetadataEditor
@@ -18,6 +19,7 @@ import com.localmusic.app.data.model.Song
 import com.localmusic.app.data.model.SongEntity
 import com.localmusic.app.data.model.toSong
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class MusicRepository(
     private val context: Context,
@@ -27,13 +29,18 @@ class MusicRepository(
     private val metadataEditor: MusicMetadataEditor = MusicMetadataEditor(context)
 ) {
 
-    /** 观察整个曲库（即"主收藏"内容），持久化流。 */
-    fun observeSongs(): Flow<List<SongEntity>> = songDao.observeAll()
+    private companion object {
+        const val TAG = "MusicRepository"
+    }
 
-    fun observePlaylists(): Flow<List<PlaylistWithCount>> = playlistDao.observePlaylists()
+    /** 观察整个曲库（即"主收藏"内容），持久化流。distinctUntilChanged 过滤瞬时脏数据。 */
+    fun observeSongs(): Flow<List<SongEntity>> = songDao.observeAll().distinctUntilChanged()
+
+    fun observePlaylists(): Flow<List<PlaylistWithCount>> =
+        playlistDao.observePlaylists().distinctUntilChanged()
 
     fun observePlaylistSongIds(playlistId: Long): Flow<List<Long>> =
-        playlistDao.observeSongIdsInPlaylist(playlistId)
+        playlistDao.observeSongIdsInPlaylist(playlistId).distinctUntilChanged()
 
     // ---------- 导入 ----------
 
@@ -86,13 +93,16 @@ class MusicRepository(
     ): MusicMetadataEditor.Result {
         val entity = songDao.getById(songId) ?: return MusicMetadataEditor.Result.Failed("歌曲不存在")
         val uri = Uri.parse(entity.uri)
+        Log.i(TAG, "updateSongMetadata: songId=$songId, oldUri=${entity.uri}, newTitle=$title")
         val result = metadataEditor.editMetadata(uri, title, artist, album)
         if (result is MusicMetadataEditor.Result.Success) {
-            songDao.updateMetadata(songId, title, artist, album)
-            // 关键：如果文件被重命名了（URI 变化），必须更新数据库
-            if (result.newUri != uri) {
-                songDao.updateUri(songId, result.newUri.toString())
-            }
+            // 始终使用原子事务 updateMetadataAndUri，杜绝中间态 Flow 发射旧 URI
+            val newUriStr = result.newUri.toString()
+            Log.i(TAG, "updateSongMetadata: editMetadata 返回 newUri=$newUriStr, oldUri=${entity.uri}")
+            songDao.updateMetadataAndUri(songId, title, artist, album, newUriStr)
+            Log.i(TAG, "updateSongMetadata: 已调用 updateMetadataAndUri（原子事务）")
+        } else {
+            Log.w(TAG, "updateSongMetadata: editMetadata 失败: $result")
         }
         return result
     }

@@ -2,6 +2,7 @@ package com.localmusic.app
 
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -158,6 +159,8 @@ class MainActivity : ComponentActivity() {
             val onSongClick: (Long) -> Unit = remember(currentPlaylistSongs) {
                 { songId: Long ->
                     val index = currentPlaylistSongs.indexOfFirst { it.id == songId }.coerceAtLeast(0)
+                    val song = currentPlaylistSongs.getOrNull(index)
+                    Log.i("MainActivity", "onSongClick: songId=$songId, index=$index, uri=${song?.uri}, title=${song?.title}, totalSongs=${currentPlaylistSongs.size}")
                     if (currentPlaylistSongs.isNotEmpty()) {
                         playerViewModel.playSongs(currentPlaylistSongs, index)
                     }
@@ -280,11 +283,12 @@ class MainActivity : ComponentActivity() {
                     onDismiss = { if (!savingMetadata) songToEdit = null },
                     onConfirm = { title, artist, album ->
                         savingMetadata = true
-                        libraryViewModel.updateSongMetadata(song.id, title, artist, album) { result ->
+                        libraryViewModel.updateSongMetadata(song.id, title, artist, album) { result, updatedSong ->
                             savingMetadata = false
                             when (result) {
                                 is MusicMetadataEditor.Result.Success -> {
                                     songToEdit = null
+                                    updatedSong?.let { playerViewModel.updateSongInQueue(it) }
                                     Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
                                 }
                                 is MusicMetadataEditor.Result.NoWritePermission -> {

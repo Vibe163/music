@@ -34,9 +34,13 @@ class StaleUriRepairer(
         val songs = songDao.getAll()
         var repaired = 0
         var failed = 0
+        var checked = 0
+
+        Log.i(TAG, "开始 URI 修复检查，共 ${songs.size} 首歌")
 
         for (song in songs) {
             val uri = runCatching { Uri.parse(song.uri) }.getOrNull() ?: continue
+            checked++
             if (isUriReadable(uri)) continue  // URI 有效，无需修复
 
             Log.w(TAG, "发现失效 URI：songId=${song.id} title=${song.title} uri=${song.uri}")
@@ -44,7 +48,6 @@ class StaleUriRepairer(
             if (newUri != null) {
                 runCatching {
                     songDao.updateUri(song.id, newUri.toString())
-                    // 持久化新文件的权限
                     runCatching {
                         context.contentResolver.takePersistableUriPermission(
                             newUri,
@@ -52,7 +55,6 @@ class StaleUriRepairer(
                                 android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                         )
                     }
-                    // 关键：同时确保拥有父目录 Tree URI 的权限，防止未来再次失效
                     runCatching {
                         val parentTreeUri = extractParentTreeUri(uri)
                         if (parentTreeUri != null) {
@@ -71,10 +73,11 @@ class StaleUriRepairer(
                 }
             } else {
                 failed++
-                Log.w(TAG, "无法修复：songId=${song.id}（无父目录权限或未找到匹配文件）")
+                Log.w(TAG, "无法修复：songId=${song.id} title=${song.title}（无父目录权限或未找到匹配文件）")
             }
         }
 
+        Log.i(TAG, "URI 修复完成：检查 $checked 首，修复 $repaired 首，失败 $failed 首")
         RepairStats(total = songs.size, repaired = repaired, failed = failed)
     }
 
@@ -96,7 +99,6 @@ class StaleUriRepairer(
         val parentTreeUri = Uri.parse("content://com.android.externalstorage.documents/tree/$treePart")
 
         return runCatching {
-            // 关键：尝试获取父目录的权限（旧版本导入的歌曲可能没有）
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     parentTreeUri,
@@ -111,24 +113,34 @@ class StaleUriRepairer(
                 return null
             }
 
-            // 从失效 URI 解析原文件名（document 部分 %2F 分隔的最后一段）
             val docPart = path.substring(docIdx + 10)
             val oldFileName = Uri.decode(docPart.substringAfterLast("%2F", docPart.substringAfterLast("/")))
+            Log.i(TAG, "搜索文件：oldFileName=$oldFileName, title=$title")
 
             val children = treeDoc.listFiles()
+            Log.i(TAG, "父目录共有 ${children.size} 个文件")
+
             // 1. 精确匹配原文件名（重命名失败但文件还在的情况）
             children.firstOrNull { doc ->
                 doc.name?.equals(oldFileName, ignoreCase = true) == true
-            }?.let { return it.uri }
+            }?.let {
+                Log.i(TAG, "精确匹配原文件名成功：${it.name}")
+                return it.uri
+            }
 
             // 2. 按 title 匹配（重命名成功，新文件名 = title + 扩展名）
             if (title.isNotBlank()) {
                 children.firstOrNull { doc ->
                     val name = doc.name ?: return@firstOrNull false
-                    name.startsWith(title, ignoreCase = true) && isAudioFile(name)
-                }?.let { return it.uri }
+                    val nameWithoutExt = name.substringBeforeLast('.', name)
+                    nameWithoutExt.equals(title, ignoreCase = true) && isAudioFile(name)
+                }?.let {
+                    Log.i(TAG, "按 title 匹配成功：${it.name}")
+                    return it.uri
+                }
             }
 
+            Log.w(TAG, "未找到匹配文件")
             null
         }.onFailure {
             Log.w(TAG, "修复异常：$staleUri", it)

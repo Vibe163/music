@@ -233,11 +233,14 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         title: String,
         artist: String,
         album: String,
-        onResult: (MusicMetadataEditor.Result) -> Unit
+        onResult: (MusicMetadataEditor.Result, Song?) -> Unit
     ) {
         viewModelScope.launch {
             val result = repository.updateSongMetadata(songId, title, artist, album)
-            onResult(result)
+            val updatedSong = if (result is MusicMetadataEditor.Result.Success) {
+                repository.getSongById(songId)
+            } else null
+            onResult(result, updatedSong)
         }
     }
 

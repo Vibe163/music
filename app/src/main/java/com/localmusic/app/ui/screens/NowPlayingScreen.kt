@@ -819,7 +819,7 @@ private fun QueueSheet(
             )
             LazyColumn(modifier = Modifier.fillMaxHeight(0.6f)) {
                 itemsIndexed(queue, key = { _, s -> s.id }, contentType = { _, _ -> "song" }) { index, queueSong ->
-                    val onClick = remember(index) { { onSongClick(index) } }
+                    val onClick = { onSongClick(index) }
                     SongListItem(
                         song = queueSong,
                         isActive = index == currentIndex,

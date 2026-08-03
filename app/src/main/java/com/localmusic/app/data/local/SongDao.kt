@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import com.localmusic.app.data.model.SongEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -42,6 +43,13 @@ interface SongDao {
     /** 更新歌曲 URI（SAF 重命名后原 URI 失效，需写回新 URI）。 */
     @Query("UPDATE songs SET uri = :uri WHERE id = :id")
     suspend fun updateUri(id: Long, uri: String)
+
+    /** 原子更新元数据 + URI，避免中间态导致 Flow 发射旧 URI。 */
+    @Transaction
+    suspend fun updateMetadataAndUri(id: Long, title: String, artist: String, album: String, uri: String) {
+        updateMetadata(id, title, artist, album)
+        updateUri(id, uri)
+    }
 
     /** 递增播放次数。 */
     @Query("UPDATE songs SET playCount = playCount + 1 WHERE id = :id")

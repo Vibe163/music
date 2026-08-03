@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.tag.FieldKey
@@ -141,56 +142,124 @@ class MusicMetadataEditor(private val context: Context) {
             runCatching {
                 if (!title.isNullOrBlank()) {
                     val safeName = sanitizeFileName(title, ext)
+                    Log.i(TAG, "Step5: 尝试重命名 currentUri=$currentUri → $safeName")
                     val renamed = DocumentsContract.renameDocument(
                         context.contentResolver,
                         currentUri,
                         safeName
                     )
-                    if (renamed != null && renamed != currentUri) {
+                    Log.i(TAG, "Step5: renameDocument 返回 renamed=$renamed")
+                    if (renamed != null && renamed.toString() != currentUri.toString()) {
                         Log.i(TAG, "重命名成功：$currentUri → $renamed")
-                        // 对新 URI 重新获取持久化权限
-                        context.contentResolver.takePersistableUriPermission(
-                            renamed,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                                Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                        )
-                        // 释放旧 URI 权限
-                        runCatching {
-                            context.contentResolver.releasePersistableUriPermission(
-                                currentUri,
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                            )
-                        }
-                        // 关键：同时确保拥有父目录 Tree URI 的权限
-                        // 这样即使文件再次被重命名，也能通过父目录找回
-                        runCatching {
-                            val parentTreeUri = extractParentTreeUri(renamed)
-                            if (parentTreeUri != null) {
+                        // 等待 SAF provider 状态稳定（300ms，防止文件系统索引未更新）
+                        delay(300)
+
+                        // Step 5.5: 重命名后二次校验——确认新 URI 可读
+                        val readable = runCatching {
+                            context.contentResolver.openInputStream(renamed)?.use { } != null
+                        }.getOrDefault(false)
+                        if (!readable) {
+                            // 新 URI 不可读（权限问题）：尝试获取权限
+                            Log.w(TAG, "Step5.5: 新 URI 不可读，尝试获取权限")
+                            runCatching {
                                 context.contentResolver.takePersistableUriPermission(
-                                    parentTreeUri,
+                                    renamed,
                                     Intent.FLAG_GRANT_READ_URI_PERMISSION or
                                         Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                                 )
                             }
+                            runCatching {
+                                val parentTreeUri = extractParentTreeUri(renamed)
+                                if (parentTreeUri != null) {
+                                    context.contentResolver.takePersistableUriPermission(
+                                        parentTreeUri,
+                                        Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                    )
+                                }
+                            }
+                            delay(100)
+                            // 再次验证
+                            val recheck = runCatching {
+                                context.contentResolver.openInputStream(renamed)?.use { } != null
+                            }.getOrDefault(false)
+                            if (!recheck) {
+                                // 仍然不可读：回滚重命名，把文件名改回去，保持旧 URI 可用
+                                Log.e(TAG, "Step5.5: 新 URI 权限获取失败，回滚重命名")
+                                runCatching {
+                                    DocumentsContract.renameDocument(
+                                        context.contentResolver,
+                                        renamed,
+                                        extractFileName(currentUri)
+                                    )
+                                }
+                                delay(100)
+                                // currentUri 保持不变（旧 URI 仍可用）
+                                Log.i(TAG, "Step5.5: 已回滚，currentUri 保持旧值=$currentUri")
+                            } else {
+                                Log.i(TAG, "Step5.5: 权限获取成功，新 URI 可读")
+                                // 释放旧 URI 权限
+                                runCatching {
+                                    context.contentResolver.releasePersistableUriPermission(
+                                        currentUri,
+                                        Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                    )
+                                }
+                                currentUri = renamed
+                            }
+                        } else {
+                            // 新 URI 可读：释放旧 URI 权限，更新 currentUri
+                            Log.i(TAG, "Step5.5: 二次校验通过，新 URI 可读")
+                            runCatching {
+                                context.contentResolver.takePersistableUriPermission(
+                                    renamed,
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                )
+                            }
+                            runCatching {
+                                val parentTreeUri = extractParentTreeUri(renamed)
+                                if (parentTreeUri != null) {
+                                    context.contentResolver.takePersistableUriPermission(
+                                        parentTreeUri,
+                                        Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                    )
+                                }
+                            }
+                            runCatching {
+                                context.contentResolver.releasePersistableUriPermission(
+                                    currentUri,
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                )
+                            }
+                            currentUri = renamed
                         }
-                        currentUri = renamed
+                    } else {
+                        Log.w(TAG, "Step5: renamed 为 null 或 URI 未变化，跳过更新")
                     }
                 }
             }.onFailure {
                 Log.e(TAG, "Step5 重命名文件失败（Tag 已写入成功，可跳过）", it)
-                // 重命名失败不阻塞 Tag 保存，但文件未改名
             }
 
+            Log.i(TAG, "editMetadata 完成，返回 currentUri=$currentUri")
             Result.Success(currentUri)
         } finally {
             tempFile.delete()
         }
     }
 
-    /** 清理非法文件名字符。 */
+    /**
+     * 清理非法文件名字符，固定使用检测到的真实音频后缀。
+     * 防止用户输入的 title 自带错误后缀导致文件损坏（例如 m4a 文件被命名为 xxx.mp3）。
+     */
     private fun sanitizeFileName(name: String, ext: String): String {
-        val cleaned = name.replace(Regex("[/\\\\:*?\"<>|]"), "_").trim()
+        // 移除 title 中可能自带的扩展名，统一使用文件头检测到的真实格式后缀
+        val nameWithoutExt = name.substringBeforeLast('.', name)
+        val cleaned = nameWithoutExt.replace(Regex("[/\\\\:*?\"<>|]"), "_").trim()
         val trimmed = cleaned.trimEnd('.', ' ')
         return "$trimmed.$ext"
     }
@@ -300,6 +369,15 @@ class MusicMetadataEditor(private val context: Context) {
                 null
             }
         }.getOrNull()
+    }
+
+    /** 从 SAF URI 中提取原始文件名（用于回滚重命名）。 */
+    private fun extractFileName(uri: Uri): String {
+        val path = uri.path ?: return "unknown.mp3"
+        val docIdx = path.indexOf("/document/")
+        if (docIdx < 0) return "unknown.mp3"
+        val docPart = path.substring(docIdx + 10)
+        return Uri.decode(docPart.substringAfterLast("%2F", docPart.substringAfterLast("/")))
     }
 
     private companion object {
