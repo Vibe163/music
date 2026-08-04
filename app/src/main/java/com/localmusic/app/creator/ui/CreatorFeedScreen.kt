@@ -33,6 +33,8 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.DensityMedium
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -438,10 +440,6 @@ fun CreatorFeedScreen(
 
 // =====================================================================
 // 顶部导航Tab栏（1:1抖音截图）
-//
-// 结构：
-// [☰菜单]  [热点 精选 团购 同城 商城 直播 关注• 推荐(选中白粗+下划线)]  [🔍搜索]
-// =====================================================================
 @Composable
 private fun TopDouyinTabBar(
     onMenuClick: () -> Unit = {},
@@ -450,24 +448,23 @@ private fun TopDouyinTabBar(
     val tabs = listOf(
         "热点", "精选", "团购", "同城", "商城", "直播", "关注", "推荐"
     )
-    // 关注tab的索引 = 6；推荐=7（默认选中）
-    var selectedIndex by remember { mutableStateOf(7) }
+    var selectedIndex by remember { mutableStateOf(7) } // 默认选中"推荐"
     val followIndex = 6
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 10.dp),
+            .padding(top = 16.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 左侧 ☰ 菜单按钮 → 点击返回App主"本地音乐"tab
+        // 左侧 ☰ 菜单按钮
         Icon(
-            Icons.Filled.DensityMedium,
-            contentDescription = "返回主界面",
+            Icons.Filled.Menu,
+            contentDescription = "菜单",
             tint = Color.White,
             modifier = Modifier
-                .padding(horizontal = 10.dp)
-                .size(23.dp)
+                .padding(start = 16.dp, end = 12.dp)
+                .size(26.dp)
                 .clickable(onClick = onMenuClick)
         )
 
@@ -476,7 +473,7 @@ private fun TopDouyinTabBar(
             modifier = Modifier
                 .weight(1f)
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            horizontalArrangement = Arrangement.spacedBy(22.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             tabs.forEachIndexed { index, tab ->
@@ -484,25 +481,19 @@ private fun TopDouyinTabBar(
                 val isFollow = index == followIndex
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .padding(horizontal = 2.dp)
-                        .clickable { selectedIndex = index }
+                    modifier = Modifier.clickable { selectedIndex = index }
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Text(
                             text = tab,
-                            color = when {
-                                isSelected -> Color.White
-                                else -> Color.White.copy(alpha = 0.7f)
-                            },
-                            fontSize = 15.sp,
-                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
+                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f),
+                            fontSize = 18.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                         )
-                        // 关注tab上的红色小圆点（未选中也显示，模拟抖音有新内容提醒）
-                        if (isFollow && !isSelected) {
+                        if (isFollow) {
                             Box(
                                 modifier = Modifier
                                     .size(6.dp)
@@ -511,18 +502,17 @@ private fun TopDouyinTabBar(
                             )
                         }
                     }
-                    // 选中Tab的白色下划线
                     if (isSelected) {
-                        Spacer(Modifier.height(5.dp))
+                        Spacer(Modifier.height(6.dp))
                         Box(
                             modifier = Modifier
-                                .width(18.dp)
+                                .width(28.dp)
                                 .height(3.dp)
-                                .clip(RoundedCornerShape(2.dp))
+                                .clip(RoundedCornerShape(1.5.dp))
                                 .background(Color.White)
                         )
                     } else {
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(9.dp))
                     }
                 }
             }
@@ -534,23 +524,13 @@ private fun TopDouyinTabBar(
             contentDescription = "搜索",
             tint = Color.White,
             modifier = Modifier
-                .padding(horizontal = 8.dp)
-                .size(22.dp)
+                .padding(start = 12.dp, end = 16.dp)
+                .size(28.dp)
         )
     }
 }
 
-// =====================================================================
 // 左下角信息区（1:1抖音截图）
-//
-// 结构：
-// ┌─────────────────────────────────┐
-// │ 👍 共171人推荐 >                 │
-// │ @0891  [图文]                    │
-// │ 把耻辱当饭吃 ... 展开            │
-// │ 🔍 相关搜索·我16岁就跟着你跟了…>│
-// └─────────────────────────────────┘
-// =====================================================================
 @Composable
 private fun BottomLeftInfoPanel(
     work: CreatorWork,
@@ -561,140 +541,80 @@ private fun BottomLeftInfoPanel(
 ) {
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // 1. 推荐条：👍 共N人推荐 >
-        val recommendCount = work.likeCount.coerceAtLeast(50) + 100
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(4.dp))
-                .background(Color.White.copy(alpha = 0.10f))
-                .padding(horizontal = 8.dp, vertical = 5.dp)
-                .clickable(onClick = onEditWork),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Icon(
-                Icons.Filled.Favorite,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(13.dp)
-            )
-            Text(
-                text = "共${recommendCount}人推荐",
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.7f),
-                modifier = Modifier.size(14.dp)
-            )
-        }
-
-        // 2. @用户名 + [图文]标签 —— 去掉名字里的冗余@，避免显示@@
-        val displayName = work.authorName.trimStart('@')
+        // 1. @用户名 + [图文]标签
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                text = "@$displayName",
+                text = "@${work.authorName.trimStart('@')}",
                 color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.clickable { onEditWork() }
             )
-            // 媒体类型标签：图文 / 视频
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color.White.copy(alpha = 0.15f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = if (work.mediaType == MediaType.IMAGE) "图文" else "视频",
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
-                )
+            if (work.mediaType == MediaType.IMAGE) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = 0.25f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.SmartDisplay,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = "图文",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
         }
 
-        // 3. 文案 + 展开
+        // 2. 文案 + 展开
         if (work.caption.isNotBlank()) {
             val maxChars = 50
-            val truncated = work.caption.length > maxChars
-            val showText = if (captionExpanded || !truncated) work.caption
-            else work.caption.take(maxChars) + "..."
+            val truncated = work.caption.length > maxChars && !captionExpanded
+            val showText = if (truncated) work.caption.take(maxChars) + "..." else work.caption
 
-            Row(
-                verticalAlignment = Alignment.Bottom
+            Column(
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     text = showText,
                     color = Color.White,
-                    fontSize = 14.sp,
-                    maxLines = if (captionExpanded) Int.MAX_VALUE else 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.clickable { onEditWork() }
+                    fontSize = 16.sp,
+                    lineHeight = 22.sp,
+                    modifier = Modifier
+                        .clickable { onEditWork() }
                 )
                 if (truncated) {
                     Text(
-                        text = "  展开",
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
+                        text = "展开",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold,
                         modifier = Modifier.clickable(onClick = onCaptionToggle)
                     )
                 }
             }
         }
-
-        // 4. 相关搜索条
-        val searchKeyword = work.tags.firstOrNull() ?: work.caption.take(10).ifBlank { "相关推荐" }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color.White.copy(alpha = 0.10f))
-                .padding(horizontal = 10.dp, vertical = 7.dp)
-                .clickable(onClick = onEditWork),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Filled.Search,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.75f),
-                modifier = Modifier.size(14.dp)
-            )
-            Spacer(Modifier.width(5.dp))
-            Text(
-                text = "相关搜索 · $searchKeyword",
-                color = Color.White.copy(alpha = 0.75f),
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.6f),
-                modifier = Modifier.size(15.dp)
-            )
-        }
     }
 }
 
-// =====================================================================
 // 底部导航栏（1:1抖音截图）
-//
-// 5个tab居中排列，中间+号是大按钮：
-//   首页⋎   朋友   [+]   消息   我
-// 选中的tab文字变白色粗体
-// =====================================================================
 @Composable
 private fun BottomDouyinNavBar(
     selectedIndex: Int,
@@ -705,14 +625,13 @@ private fun BottomDouyinNavBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(54.dp)
-            .background(Color(0xFF000000)),
+            .height(58.dp)
+            .background(Color.Black),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
         // Tab 0: 首页
         BottomNavTab(
-            icon = Icons.Filled.Home,
             label = "首页",
             isSelected = selectedIndex == 0,
             hasDropdown = true,
@@ -720,45 +639,35 @@ private fun BottomDouyinNavBar(
         )
         // Tab 1: 朋友
         BottomNavTab(
-            icon = Icons.Filled.SmartDisplay,
             label = "朋友",
             isSelected = selectedIndex == 1,
             onClick = { onTabSelected(1) }
         )
-        // Tab 2: 中间大+号发布按钮（第三张截图风格：灰色描边圆角方框，内黑底白+号）
+        // Tab 2: 中间+号
         Box(
             modifier = Modifier
-                .width(50.dp)
-                .height(34.dp)
+                .width(48.dp)
+                .height(30.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.White)
                 .clickable { onTabSelected(2) },
             contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(9.dp))
-                    .border(2.dp, Color.White.copy(alpha = 0.85f), RoundedCornerShape(9.dp))
-                    .background(Color.Transparent),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Filled.Add,
-                    contentDescription = "发布",
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
+            Icon(
+                Icons.Filled.Add,
+                contentDescription = "发布",
+                tint = Color.Black,
+                modifier = Modifier.size(22.dp)
+            )
         }
         // Tab 3: 消息
         BottomNavTab(
-            icon = Icons.Filled.Message,
             label = "消息",
             isSelected = selectedIndex == 3,
             onClick = { onTabSelected(3) }
         )
-        // Tab 4: 我 —— 点击返回App主导航（"我的"页面）
+        // Tab 4: 我
         BottomNavTab(
-            icon = Icons.Filled.Person,
             label = "我",
             isSelected = selectedIndex == 4,
             onClick = {
@@ -769,10 +678,8 @@ private fun BottomDouyinNavBar(
     }
 }
 
-/** 底部单个Tab（首页/朋友/消息/我） */
 @Composable
 private fun BottomNavTab(
-    icon: ImageVector,
     label: String,
     isSelected: Boolean,
     onClick: () -> Unit,
@@ -780,42 +687,33 @@ private fun BottomNavTab(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
         modifier = Modifier
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .padding(horizontal = 8.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Icon(
-                icon,
-                contentDescription = label,
-                tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.6f),
-                modifier = Modifier.size(20.dp)
+            Text(
+                text = label,
+                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f),
+                fontSize = 19.sp,
+                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold
             )
-            // 首页右下角小下箭头
             if (hasDropdown) {
                 Icon(
-                    Icons.Filled.ChevronLeft,
+                    Icons.Filled.KeyboardArrowDown,
                     contentDescription = null,
-                    tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.6f),
-                    modifier = Modifier
-                        .size(10.dp)
-                        .rotate(-90f)
+                    tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = label,
-            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.6f),
-            fontSize = 11.sp,
-            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-        )
     }
 }
+
+
 
 // =====================================================================
 // 图片作品多图画廊（左右滑切换）

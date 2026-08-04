@@ -1,5 +1,10 @@
 package com.localmusic.app.creator.ui.components
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Reply
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Shortcut
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Favorite
@@ -24,12 +33,15 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -40,12 +52,12 @@ import coil.compose.AsyncImage
  * 抖音风格右侧互动栏 —— 1:1复刻截图顺序
  *
  * 垂直排列顺序（从上到下）：
- *  1. 作者头像（彩色光圈 + 右下红色+号）
+ *  1. 作者头像（白圈 + 底部红色+号）
  *  2. 点赞（红心/白心 + 数字）
  *  3. 评论（对话框 + 数字）
  *  4. 收藏（黄星/白星 + 数字）
- *  5. 分享（箭头 + 数字）
- *  6. 拍同款（作者小头像 + "拍同款"文字）
+ *  5. 分享（右弯箭头 + 数字）
+ *  6. 拍同款（旋转黑胶唱片）
  */
 @Composable
 fun FeedInteractionBar(
@@ -67,21 +79,21 @@ fun FeedInteractionBar(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
         modifier = modifier
     ) {
-        // 1. 作者头像（彩色渐变光圈 + 右下红色+号）
-        AvatarWithRainbowRing(
+        // 1. 作者头像
+        AvatarWithPlus(
             avatarUri = avatarUri,
             authorName = authorName,
             onClick = onAvatarClick
         )
 
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(2.dp))
 
         // 2. 点赞
         InteractionButton(
-            icon = if (userLiked) Icons.Filled.Favorite else Icons.Outlined.Favorite,
+            icon = Icons.Filled.Favorite,
             count = likeCount,
             tint = if (userLiked) Color(0xFFFE2C55) else Color.White,
             onClick = onLikeClick
@@ -97,22 +109,24 @@ fun FeedInteractionBar(
 
         // 4. 收藏
         InteractionButton(
-            icon = if (userCollected) Icons.Filled.Star else Icons.Outlined.Star,
+            icon = Icons.Filled.Star,
             count = collectCount,
-            tint = if (userCollected) Color(0xFFFFC107) else Color.White,
+            tint = if (userCollected) Color(0xFFFFD700) else Color.White,
             onClick = onCollectClick
         )
 
         // 5. 分享
         InteractionButton(
-            icon = Icons.Filled.Share,
+            icon = Icons.AutoMirrored.Filled.Shortcut,
             count = shareCount,
             tint = Color.White,
             onClick = onShareClick
         )
 
-        // 6. 拍同款（作者小头像 + 拍同款文字）
-        ShootSameButton(
+        Spacer(Modifier.height(8.dp))
+
+        // 6. 旋转唱片
+        RotatingMusicDisc(
             avatarUri = avatarUri,
             onClick = onShootSame
         )
@@ -120,75 +134,48 @@ fun FeedInteractionBar(
 }
 
 /**
- * 作者头像：圆形 + 彩虹色渐变光圈（抖音风格）
- * 右下角一个红底白+号的圆形按钮（稍微突出）
+ * 作者头像：白圈 + 底部红色+号
  */
 @Composable
-private fun AvatarWithRainbowRing(
+private fun AvatarWithPlus(
     avatarUri: String?,
     authorName: String,
     onClick: () -> Unit
 ) {
-    // 彩虹渐变光圈（抖音标准配色：粉→紫→蓝→绿→黄→红）
-    val rainbowBrush = Brush.sweepGradient(
-        colors = listOf(
-            Color(0xFFFF6B6B),   // 红
-            Color(0xFFFE2C55),   // 抖音红
-            Color(0xFFFFA500),   // 橙
-            Color(0xFFFFEB3B),   // 黄
-            Color(0xFF4CAF50),   // 绿
-            Color(0xFF2196F3),   // 蓝
-            Color(0xFF9C27B0),   // 紫
-            Color(0xFFFE2C55),   // 抖音红
-            Color(0xFFFF6B6B),   // 红
-        )
-    )
-
     Box(
         modifier = Modifier
-            .size(50.dp)
-            .clip(CircleShape)
-            .background(rainbowBrush)
+            .size(48.dp)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        // 内层黑色边框 + 头像
-        Box(
+        // 头像主体
+        AsyncImage(
+            model = avatarUri,
+            contentDescription = authorName,
+            contentScale = ContentScale.Crop,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(2.dp)
                 .clip(CircleShape)
-                .background(Color.Black),
-            contentAlignment = Alignment.Center
-        ) {
-            AsyncImage(
-                model = avatarUri,
-                contentDescription = authorName,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(1.5.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF2A2A2A))
-            )
-        }
+                .border(1.5.dp, Color.White, CircleShape)
+                .background(Color(0xFF2A2A2A))
+        )
 
-        // 右下角红色+号（稍微超出一点圈外）—— 用 absoluteOffset 代替负 padding
+        // 底部红色+号
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .absoluteOffset(y = 6.dp)
-                .size(18.dp)
+                .absoluteOffset(y = 9.dp)
+                .size(20.dp)
                 .clip(CircleShape)
                 .background(Color(0xFFFE2C55))
-                .border(1.5.dp, Color.Black, CircleShape),
+                .border(1.dp, Color.White, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 Icons.Filled.Add,
                 contentDescription = "关注",
                 tint = Color.White,
-                modifier = Modifier.size(12.dp)
+                modifier = Modifier.size(14.dp)
             )
         }
     }
@@ -214,7 +201,6 @@ private fun InteractionButton(
             tint = tint,
             modifier = Modifier.size(32.dp)
         )
-        Spacer(Modifier.height(2.dp))
         Text(
             text = formatCount(count),
             color = Color.White,
@@ -225,41 +211,54 @@ private fun InteractionButton(
 }
 
 /**
- * 拍同款按钮：作者小头像（圆形）+ "拍同款" 文字
- * 竖排布局
+ * 旋转唱片按钮：黑胶唱片效果
  */
 @Composable
-private fun ShootSameButton(
+private fun RotatingMusicDisc(
     avatarUri: String?,
     onClick: () -> Unit
 ) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable(onClick = onClick)
+    val infiniteTransition = rememberInfiniteTransition(label = "disc")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = LinearEasing)
+        ),
+        label = "rotation"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .graphicsLayer { rotationZ = rotation }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
     ) {
+        // 外圈黑胶
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .fillMaxSize()
                 .clip(CircleShape)
-                .background(Color(0xFF1A1A1A))
-                .border(1.5.dp, Color.Black.copy(alpha = 0.5f), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            AsyncImage(
-                model = avatarUri,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(CircleShape)
-            )
-        }
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = "拍同款",
-            color = Color.White,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFF333333),
+                            Color(0xFF000000)
+                        )
+                    )
+                )
+                .border(8.dp, Color(0xFF111111), CircleShape)
+        )
+
+        // 内圈头像
+        AsyncImage(
+            model = avatarUri,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
         )
     }
 }
