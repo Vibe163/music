@@ -66,6 +66,19 @@ class WorkStore(context: Context) {
         persist()
     }
 
+    /** 同步作者资料到其所有作品（修改头像/昵称后，浏览页所有场景立即生效） */
+    fun updateAuthorInfo(authorId: String, newName: String, newAvatarUri: String?) {
+        var matched = 0
+        _works.value = _works.value.map {
+            if (it.authorId == authorId) {
+                matched++
+                it.copy(authorName = newName, authorAvatarUri = newAvatarUri)
+            } else it
+        }
+        Log.i(TAG, "updateAuthorInfo: authorId=$authorId, matched=$matched, total=${_works.value.size}, newName=$newName")
+        persist()
+    }
+
     /** 删除作品 */
     fun delete(workId: String) {
         _works.value = _works.value.filter { it.id != workId }

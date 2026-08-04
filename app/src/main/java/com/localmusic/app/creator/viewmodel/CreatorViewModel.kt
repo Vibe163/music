@@ -2,6 +2,7 @@ package com.localmusic.app.creator.viewmodel
 
 import android.app.Application
 import android.content.ContentUris
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -294,15 +295,20 @@ class CreatorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 更新创作者资料 */
+    /** 更新创作者资料，并同步头像/昵称到该用户所有已发布作品（浏览页立即生效） */
     fun updateUserProfile(avatarUri: String?, nickname: String, bio: String) {
+        val cleanNickname = nickname.trim()
+        val current = userProfileStore.profile.value
+        Log.i(TAG, "updateUserProfile: userId=${current.userId}, nickname=$cleanNickname, avatar=$avatarUri")
         userProfileStore.update(
             com.localmusic.app.creator.data.storage.CreatorUserProfile(
                 avatarUri = avatarUri,
-                nickname = nickname.trim(),
+                nickname = cleanNickname,
                 bio = bio.trim()
             )
         )
+        // 同步作者资料到所有作品（authorId 匹配），浏览页互动栏/作者主页/拍同款头像全部一致
+        workStore.updateAuthorInfo(current.userId, cleanNickname, avatarUri)
     }
 
     /**
@@ -338,6 +344,25 @@ class CreatorViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 资料是否已配置完整 */
     fun isProfileComplete(): Boolean = userProfileStore.isComplete()
+
+    /**
+     * 保存裁剪后的头像 Bitmap 到 App 私有目录，返回稳定的 file:// URI 字符串。
+     * 裁剪结果统一为 300×300 JPEG（与列表缩略图尺寸一致，解码快）。
+     */
+    suspend fun saveCroppedAvatar(avatar: Bitmap): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val appContext = getApplication<LocalMusicApp>()
+            val avatarDir = File(appContext.filesDir, "avatars").apply { mkdirs() }
+            val destFile = File(avatarDir, "avatar_${System.currentTimeMillis()}.jpg")
+            destFile.outputStream().use { fos ->
+                avatar.compress(Bitmap.CompressFormat.JPEG, 90, fos)
+            }
+            Log.i(TAG, "saveCroppedAvatar: -> ${destFile.absolutePath}")
+            Uri.fromFile(destFile).toString()
+        }.onFailure {
+            Log.e(TAG, "saveCroppedAvatar failed", it)
+        }.getOrNull()
+    }
 
     /**
      * 将 SAF 返回的媒体 URI（图片/视频）复制到 App 私有目录，返回稳定的 file:// URI。

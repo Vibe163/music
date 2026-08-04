@@ -2,6 +2,7 @@ package com.localmusic.app.creator.ui.components
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,7 +31,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,7 +42,6 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.localmusic.app.creator.data.storage.CreatorUserProfile
 import com.localmusic.app.creator.viewmodel.CreatorViewModel
-import kotlinx.coroutines.launch
 
 /**
  * 创作者资料编辑弹窗（在「我的」页面调用）
@@ -55,27 +54,18 @@ fun CreatorProfileEditorDialog(
     onDismiss: () -> Unit
 ) {
     val currentProfile by viewModel.userProfile.collectAsState()
-    val scope = rememberCoroutineScope()
 
     var avatarUri by remember { mutableStateOf(currentProfile.avatarUri) }
     var nickname by remember { mutableStateOf(currentProfile.nickname) }
     var bio by remember { mutableStateOf(currentProfile.bio) }
-    var copyingAvatar by remember { mutableStateOf(false) }
+    // 从相册选中后先进入裁剪页（抖音风格框选），确认裁剪后才更新头像
+    var cropSourceUri by remember { mutableStateOf<Uri?>(null) }
 
     val pickAvatarLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
+        ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            // SAF 返回的 content:// URI 是临时授权，重启后失效。
-            // 立即复制到 App 私有目录，存储 file:// URI 持久化使用。
-            copyingAvatar = true
-            scope.launch {
-                val stableUri = viewModel.copyAvatarToInternal(uri)
-                if (stableUri != null) {
-                    avatarUri = stableUri
-                }
-                copyingAvatar = false
-            }
+            cropSourceUri = uri
         }
     }
 
@@ -94,17 +84,14 @@ fun CreatorProfileEditorDialog(
                         .size(72.dp)
                         .clip(CircleShape)
                         .background(Color(0xFF2A2A2A))
-                        .clickable { pickAvatarLauncher.launch(arrayOf("image/*")) },
+                        .clickable {
+                            pickAvatarLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     when {
-                        copyingAvatar -> {
-                            androidx.compose.material3.CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp
-                            )
-                        }
                         avatarUri != null -> {
                             AsyncImage(
                                 model = Uri.parse(avatarUri),
@@ -153,4 +140,17 @@ fun CreatorProfileEditorDialog(
             }
         }
     )
+
+    // 选中相册图片后进入裁剪页，确认裁剪后才应用头像
+    cropSourceUri?.let { uri ->
+        AvatarCropDialog(
+            viewModel = viewModel,
+            imageUri = uri,
+            onCancel = { cropSourceUri = null },
+            onConfirm = { croppedUri ->
+                avatarUri = croppedUri
+                cropSourceUri = null
+            }
+        )
+    }
 }

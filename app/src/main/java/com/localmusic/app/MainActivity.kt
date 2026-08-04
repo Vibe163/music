@@ -9,6 +9,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,6 +23,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -354,6 +361,14 @@ class MainActivity : ComponentActivity() {
             val showMiniPlayer = !inCreatorSpace && playerState.currentSong != null &&
                 currentRoute != Screen.NowPlaying.route
 
+            // 进入创作者空间时暂停外部音乐播放，避免与创作者 BGM/视频原声叠加；
+            // 退出后保持暂停，不自动恢复
+            LaunchedEffect(inCreatorSpace) {
+                if (inCreatorSpace && playerState.isPlaying) {
+                    playerViewModel.togglePlayPause()
+                }
+            }
+
             // MiniPlayer 点击跳转——稳定化避免每秒重建
             val onMiniPlayerClick: () -> Unit = remember(navController) {
                 { navController.navigate(Screen.NowPlaying.route) }
@@ -391,7 +406,26 @@ class MainActivity : ComponentActivity() {
                 NavHost(
                     navController = navController,
                     startDestination = Screen.Library.route,
-                    modifier = if (inCreatorSpace) Modifier.fillMaxSize() else Modifier
+                    // 统一导航过渡：淡入淡出 + 轻微缩放（无滑动，避免黑底全屏页切换时的闪帧/残影）
+                    enterTransition = {
+                        fadeIn(tween(250, easing = FastOutSlowInEasing)) +
+                            scaleIn(initialScale = 1.03f, animationSpec = tween(250, easing = FastOutSlowInEasing))
+                    },
+                    exitTransition = {
+                        fadeOut(tween(250, easing = FastOutSlowInEasing)) +
+                            scaleOut(targetScale = 0.97f, animationSpec = tween(250, easing = FastOutSlowInEasing))
+                    },
+                    popEnterTransition = {
+                        fadeIn(tween(250, easing = FastOutSlowInEasing)) +
+                            scaleIn(initialScale = 0.97f, animationSpec = tween(250, easing = FastOutSlowInEasing))
+                    },
+                    popExitTransition = {
+                        fadeOut(tween(250, easing = FastOutSlowInEasing)) +
+                            scaleOut(targetScale = 1.03f, animationSpec = tween(250, easing = FastOutSlowInEasing))
+                    },
+                    // 固定布局：创作者空间时 bottomBar 为空，padding 底部为 0，页面全屏；
+                    // 正常页面由 Scaffold 提供底部栏 padding。避免退出瞬间 modifier 突变引发闪帧
+                    modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
                 ) {

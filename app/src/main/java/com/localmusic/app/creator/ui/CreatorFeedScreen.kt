@@ -1,12 +1,15 @@
 package com.localmusic.app.creator.ui
 
 import android.net.Uri
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +57,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -61,6 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -70,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.exoplayer.ExoPlayer
 import coil.compose.AsyncImage
 import com.localmusic.app.creator.data.model.CreatorWork
 import com.localmusic.app.creator.data.model.MediaType
@@ -204,6 +210,8 @@ fun CreatorFeedScreen(
         ) { pageIndex ->
             val work = works.getOrNull(pageIndex) ?: return@VerticalPager
             val isCurrentPage = pageIndex == currentIndex
+            // 本页视频的 ExoPlayer 引用（由 FeedVideoPlayer 回调暴露；每页独立，避免跨页捕获过期 isCurrentPage）
+            var pageVideoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
 
             Box(
                 modifier = Modifier
@@ -216,7 +224,8 @@ fun CreatorFeedScreen(
                         if (work.mediaList.isNotEmpty()) {
                             FeedVideoPlayer(
                                 videoUri = work.mediaList.first(),
-                                isCurrentPage = isCurrentPage && !isVideoPaused
+                                isCurrentPage = isCurrentPage && !isVideoPaused,
+                                onPlayerChange = { player -> pageVideoPlayer = player }
                             )
                         }
                     }
@@ -262,6 +271,19 @@ fun CreatorFeedScreen(
                             contentDescription = "播放",
                             tint = Color.White.copy(alpha = 0.7f),
                             modifier = Modifier.size(72.dp)
+                        )
+                    }
+                }
+
+                // 视频进度条（渲染在手势层之上：拖动优先于单击暂停，可拖拽 seek）
+                // 上移 60dp 避开底部抖音导航栏（54dp）
+                if (work.mediaType == MediaType.VIDEO && isCurrentPage) {
+                    pageVideoPlayer?.let { player ->
+                        VideoProgressBar(
+                            player = player,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 60.dp)
                         )
                     }
                 }
@@ -573,7 +595,12 @@ private fun BottomLeftInfoPanel(
     modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = modifier,
+        modifier = modifier
+            // 拦截空白区域点击：不穿透触发视频暂停（与抖音一致，左下信息区空隙不暂停）
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { },
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // 1. @用户名 + [图文]标签
@@ -809,6 +836,89 @@ private fun BottomNavTab(
                     modifier = Modifier.size(16.dp)
                 )
             }
+        }
+    }
+}
+
+/**
+ * 抖音风格视频进度条：底部细线 + 拖动滑块控制进度
+ *
+ * 渲染在手势层之上，拖动事件优先于页面单击暂停：
+ *  - 拖动：seek 到对应位置（松手后按当前播放状态继续）
+ *  - 点击：被自身消费，不触发页面暂停
+ */
+@Composable
+private fun VideoProgressBar(
+    player: ExoPlayer,
+    modifier: Modifier = Modifier
+) {
+    var durationMs by remember { mutableLongStateOf(0L) }
+    var positionMs by remember { mutableLongStateOf(0L) }
+    var isDragging by remember { mutableStateOf(false) }
+    var dragFraction by remember { mutableStateOf(0f) }
+
+    // 周期刷新播放进度
+    LaunchedEffect(player) {
+        while (true) {
+            durationMs = player.duration.coerceAtLeast(0L)
+            positionMs = player.currentPosition
+            kotlinx.coroutines.delay(200)
+        }
+    }
+
+    val displayFraction = if (isDragging) dragFraction
+    else if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(28.dp)
+            // 拦截轻点：不穿透到页面手势层，避免点进度条触发暂停
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { }
+            .pointerInput(player) {
+                detectDragGestures(
+                    // onDragStart 参数 = 手指按下位置；滑块直接跳到手指按下处（与抖音一致）
+                    onDragStart = { startOffset ->
+                        isDragging = true
+                        dragFraction = (startOffset.x / size.width).coerceIn(0f, 1f)
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        dragFraction = (dragFraction + dragAmount.x / size.width).coerceIn(0f, 1f)
+                    },
+                    onDragEnd = {
+                        player.seekTo((dragFraction * durationMs).toLong())
+                        isDragging = false
+                    },
+                    onDragCancel = { isDragging = false }
+                )
+            }
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val trackY = size.height / 2f
+            // 背景轨道
+            drawLine(
+                color = Color.White.copy(alpha = 0.35f),
+                start = Offset(0f, trackY),
+                end = Offset(size.width, trackY),
+                strokeWidth = 2.dp.toPx()
+            )
+            // 已播放进度
+            drawLine(
+                color = Color.White,
+                start = Offset(0f, trackY),
+                end = Offset(size.width * displayFraction, trackY),
+                strokeWidth = 2.dp.toPx()
+            )
+            // 进度滑块（拖动时放大）
+            drawCircle(
+                color = Color.White,
+                radius = if (isDragging) 6.dp.toPx() else 3.dp.toPx(),
+                center = Offset(size.width * displayFraction, trackY)
+            )
         }
     }
 }

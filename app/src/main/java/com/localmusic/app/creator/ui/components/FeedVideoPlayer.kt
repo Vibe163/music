@@ -20,6 +20,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,15 +53,18 @@ import kotlinx.coroutines.delay
 fun FeedVideoPlayer(
     videoUri: String,
     isCurrentPage: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onPlayerChange: (ExoPlayer?) -> Unit = {}
 ) {
     val context = LocalContext.current
     var player by remember { mutableStateOf<ExoPlayer?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var hasError by remember { mutableStateOf(false) }
+    val currentOnPlayerChange by rememberUpdatedState(onPlayerChange)
 
     LaunchedEffect(videoUri) {
         player?.release()
+        currentOnPlayerChange(null)
         hasError = false
         isLoading = true
         val newPlayer = ExoPlayer.Builder(context).build().apply {
@@ -82,6 +86,7 @@ fun FeedVideoPlayer(
             })
         }
         player = newPlayer
+        currentOnPlayerChange(newPlayer)
         // 3秒超时兜底：还没ready就当失败，避免一直loading全黑
         delay(3000)
         if (isLoading) {
@@ -101,6 +106,7 @@ fun FeedVideoPlayer(
 
     DisposableEffect(Unit) {
         onDispose {
+            currentOnPlayerChange(null)
             player?.release()
             player = null
         }
