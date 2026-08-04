@@ -687,7 +687,7 @@ private fun Step3EditScreen(
                 AsyncImage(
                     model = coverUri,
                     contentDescription = null,
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .align(Alignment.Center)
                         .fillMaxSize()
@@ -1024,7 +1024,7 @@ private fun Step4SubmitScreen(
                             AsyncImage(
                                 model = coverUri,
                                 null,
-                                contentScale = ContentScale.Crop,
+                                contentScale = ContentScale.Fit,
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -1060,7 +1060,7 @@ private fun Step4SubmitScreen(
                             if (coverUri != null) {
                                 AsyncImage(
                                     model = coverUri, null,
-                                    contentScale = ContentScale.Crop,
+                                    contentScale = ContentScale.Fit,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }

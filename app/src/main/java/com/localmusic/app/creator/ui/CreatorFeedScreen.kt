@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,8 +39,14 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SmartDisplay
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -262,6 +269,32 @@ fun CreatorFeedScreen(
         }
 
         // ============================================================
+        // 1.5 顶部与底部遮罩层（增强文字可读性）
+        // ============================================================
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
+                .align(Alignment.TopCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Black.copy(alpha = 0.35f), Color.Transparent)
+                    )
+                )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(240.dp)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f))
+                    )
+                )
+        )
+
+        // ============================================================
         // 2. 双击点赞红心动画
         // ============================================================
         if (showHeart) {
@@ -454,7 +487,7 @@ private fun TopDouyinTabBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 16.dp, bottom = 8.dp),
+            .padding(top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // 左侧 ☰ 菜单按钮
@@ -463,8 +496,8 @@ private fun TopDouyinTabBar(
             contentDescription = "菜单",
             tint = Color.White,
             modifier = Modifier
-                .padding(start = 16.dp, end = 12.dp)
-                .size(26.dp)
+                .padding(start = 12.dp, end = 6.dp)
+                .size(24.dp)
                 .clickable(onClick = onMenuClick)
         )
 
@@ -473,7 +506,7 @@ private fun TopDouyinTabBar(
             modifier = Modifier
                 .weight(1f)
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(22.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             tabs.forEachIndexed { index, tab ->
@@ -483,36 +516,35 @@ private fun TopDouyinTabBar(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.clickable { selectedIndex = index }
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
+                    Box(contentAlignment = Alignment.TopEnd) {
                         Text(
                             text = tab,
-                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f),
-                            fontSize = 18.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.65f),
+                            fontSize = 16.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 2.dp)
                         )
                         if (isFollow) {
                             Box(
                                 modifier = Modifier
-                                    .size(6.dp)
+                                    .absoluteOffset(x = 5.dp, y = (-2).dp)
+                                    .size(5.dp)
                                     .clip(CircleShape)
                                     .background(DouyinRed)
                             )
                         }
                     }
                     if (isSelected) {
-                        Spacer(Modifier.height(6.dp))
+                        Spacer(Modifier.height(4.dp))
                         Box(
                             modifier = Modifier
-                                .width(28.dp)
-                                .height(3.dp)
-                                .clip(RoundedCornerShape(1.5.dp))
+                                .width(22.dp)
+                                .height(2.dp)
+                                .clip(RoundedCornerShape(1.dp))
                                 .background(Color.White)
                         )
                     } else {
-                        Spacer(Modifier.height(9.dp))
+                        Spacer(Modifier.height(6.dp))
                     }
                 }
             }
@@ -524,13 +556,14 @@ private fun TopDouyinTabBar(
             contentDescription = "搜索",
             tint = Color.White,
             modifier = Modifier
-                .padding(start = 12.dp, end = 16.dp)
-                .size(28.dp)
+                .padding(start = 6.dp, end = 12.dp)
+                .size(24.dp)
         )
     }
 }
 
 // 左下角信息区（1:1抖音截图）
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun BottomLeftInfoPanel(
     work: CreatorWork,
@@ -541,44 +574,41 @@ private fun BottomLeftInfoPanel(
 ) {
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // 1. @用户名 + [图文]标签
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
                 text = "@${work.authorName.trimStart('@')}",
                 color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier.clickable { onEditWork() }
             )
             if (work.mediaType == MediaType.IMAGE) {
-                Box(
+                Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(2.dp))
-                        .background(Color.White.copy(alpha = 0.25f))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .background(Color.White.copy(alpha = 0.15f))
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Icon(
-                            Icons.Filled.SmartDisplay,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Text(
-                            text = "图文",
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    Icon(
+                        androidx.compose.material.icons.Icons.Filled.SmartDisplay,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Text(
+                        text = "图文",
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -595,8 +625,8 @@ private fun BottomLeftInfoPanel(
                 Text(
                     text = showText,
                     color = Color.White,
-                    fontSize = 16.sp,
-                    lineHeight = 22.sp,
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
                     modifier = Modifier
                         .clickable { onEditWork() }
                 )
@@ -604,12 +634,65 @@ private fun BottomLeftInfoPanel(
                     Text(
                         text = "展开",
                         color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
                         modifier = Modifier.clickable(onClick = onCaptionToggle)
                     )
                 }
             }
+        }
+
+        // 3. 相关搜索条 (1:1复刻抖音样式)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color.Black.copy(alpha = 0.25f))
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = null,
+                tint = Color(0xFFFE2C55),
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                text = "及時行樂", // 模拟截图中的搜索词
+                color = Color.White.copy(alpha = 0.9f),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.5f),
+                modifier = Modifier.size(16.dp)
+            )
+        }
+
+        // 4. 滚动音乐标题条 (Marquee)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(top = 2.dp)
+        ) {
+            Icon(
+                Icons.Filled.MusicNote,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                text = "AI 默认BGM - 纯音乐片段",
+                color = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .width(180.dp)
+                    .basicMarquee(iterations = Int.MAX_VALUE)
+            )
         }
     }
 }
@@ -625,7 +708,7 @@ private fun BottomDouyinNavBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(58.dp)
+            .height(54.dp)
             .background(Color.Black),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceEvenly
@@ -643,22 +726,39 @@ private fun BottomDouyinNavBar(
             isSelected = selectedIndex == 1,
             onClick = { onTabSelected(1) }
         )
-        // Tab 2: 中间+号
+        // Tab 2: 中间+号 (1:1深度复刻抖音三层叠加样式)
         Box(
             modifier = Modifier
-                .width(48.dp)
-                .height(30.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color.White)
+                .width(45.dp)
+                .height(28.dp)
                 .clickable { onTabSelected(2) },
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                Icons.Filled.Add,
-                contentDescription = "发布",
-                tint = Color.Black,
-                modifier = Modifier.size(22.dp)
-            )
+            // 底层：左青右红的溢出背景
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(8.dp))
+            ) {
+                Box(modifier = Modifier.weight(1f).fillMaxSize().background(Color(0xFF25F4EE)))
+                Box(modifier = Modifier.weight(1f).fillMaxSize().background(Color(0xFFFE2C55)))
+            }
+            // 顶层：覆盖在中间的白色按钮，露出左右边缘
+            Box(
+                modifier = Modifier
+                    .width(37.dp)
+                    .height(28.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = "发布",
+                    tint = Color.Black,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
         // Tab 3: 消息
         BottomNavTab(
@@ -689,23 +789,23 @@ private fun BottomNavTab(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp)
+            .padding(horizontal = 4.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+            horizontalArrangement = Arrangement.spacedBy(1.dp)
         ) {
             Text(
                 text = label,
-                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f),
-                fontSize = 19.sp,
+                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.6f),
+                fontSize = 18.sp,
                 fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold
             )
             if (hasDropdown) {
                 Icon(
                     Icons.Filled.KeyboardArrowDown,
                     contentDescription = null,
-                    tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f),
+                    tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.6f),
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -761,7 +861,7 @@ private fun ImageGallery(
             AsyncImage(
                 model = Uri.parse(imageUris[pageIndex]),
                 contentDescription = null,
-                contentScale = ContentScale.Crop,
+                contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize()
             )
         }
