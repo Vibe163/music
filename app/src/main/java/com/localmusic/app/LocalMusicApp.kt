@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.localmusic.app.data.importer.StaleUriRepairer
@@ -60,6 +61,10 @@ class LocalMusicApp : Application(), ImageLoaderFactory {
                 .directory(cacheDir.resolve("image_cache"))
                 .maxSizeBytes(100L * 1024 * 1024)
                 .build()
+        }
+        .components {
+            // 视频缩略图解码器（相册/发布流程里视频 content:// URI 的第一帧缩略图）
+            add(VideoFrameDecoder.Factory())
         }
         .respectCacheHeaders(false)
         .crossfade(false)

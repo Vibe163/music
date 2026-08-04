@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
 }
 
@@ -66,6 +67,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
 
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-video:2.7.0")
 
     // 音频元数据写入（ID3/Vorbis/MP4 tag），Android 兼容版 fork
     implementation("com.github.AdrienPoupa:jaudiotagger:2.2.3")
@@ -75,6 +77,9 @@ dependencies {
     implementation("androidx.palette:palette:1.0.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.9.0")
+
+    // JSON 序列化（创作者训练空间的作品数据持久化）
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")

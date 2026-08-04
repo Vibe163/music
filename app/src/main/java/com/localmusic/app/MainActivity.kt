@@ -33,6 +33,10 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.localmusic.app.data.model.Song
 import com.localmusic.app.data.importer.MusicMetadataEditor
+import com.localmusic.app.creator.ui.CreatorFeedScreen
+import com.localmusic.app.creator.ui.CreatorProfileScreen
+import com.localmusic.app.creator.ui.PublishWorkScreen
+import com.localmusic.app.creator.viewmodel.CreatorViewModel
 import com.localmusic.app.ui.components.AddSongsToPlaylistDialog
 import com.localmusic.app.ui.components.AddToPlaylistDialog
 import com.localmusic.app.ui.components.BottomNavBar
@@ -82,6 +86,7 @@ class MainActivity : ComponentActivity() {
             val navController = rememberNavController()
             val libraryViewModel: LibraryViewModel = viewModel()
             val playerViewModel: PlayerViewModel = viewModel()
+            val creatorViewModel: CreatorViewModel = viewModel()
 
             var showCreatePlaylist by remember { mutableStateOf(false) }
             var songToAdd by remember { mutableStateOf<Song?>(null) }
@@ -89,7 +94,10 @@ class MainActivity : ComponentActivity() {
             var savingMetadata by remember { mutableStateOf(false) }
             var showAddSongsDialog by remember { mutableStateOf(false) }
             var showImportResultDialog by remember { mutableStateOf(false) }
+            var showCreatorProfileEditor by remember { mutableStateOf(false) }
             val context = LocalContext.current
+
+            val creatorProfile by creatorViewModel.userProfile.collectAsState()
 
             val playerState by playerViewModel.uiState.collectAsState()
             // 进度独立订阅：高频 1Hz 只影响 MiniPlayerBar，不触发主 uiState 重组
@@ -322,12 +330,28 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            val showBottomBar = currentRoute in setOf(
+            // 创作者资料编辑弹窗（在「我的」页面触发）
+            if (showCreatorProfileEditor) {
+                com.localmusic.app.creator.ui.components.CreatorProfileEditorDialog(
+                    viewModel = creatorViewModel,
+                    onDismiss = { showCreatorProfileEditor = false }
+                )
+            }
+
+            // 创作者空间沉浸式全屏：进入 CreatorFeed / CreatorPublish / CreatorProfile 均隐藏 App 底部导航 & MiniPlayer
+            val creatorRoutes = setOf(
+                Screen.CreatorFeed.route,
+                Screen.CreatorPublish.route
+            )
+            val inCreatorSpace = creatorRoutes.any { currentRoute == it || currentRoute?.startsWith(it) == true }
+                || currentRoute?.startsWith(Screen.CreatorProfile.route.takeWhile { it != '{' }) == true
+            val showBottomBar = !inCreatorSpace && currentRoute in setOf(
                 Screen.Library.route,
                 Screen.PlaylistsTab.route,
+                Screen.CreatorFeed.route,
                 Screen.Settings.route
             )
-            val showMiniPlayer = playerState.currentSong != null &&
+            val showMiniPlayer = !inCreatorSpace && playerState.currentSong != null &&
                 currentRoute != Screen.NowPlaying.route
 
             // MiniPlayer 点击跳转——稳定化避免每秒重建
@@ -367,7 +391,7 @@ class MainActivity : ComponentActivity() {
                 NavHost(
                     navController = navController,
                     startDestination = Screen.Library.route,
-                    modifier = Modifier
+                    modifier = if (inCreatorSpace) Modifier.fillMaxSize() else Modifier
                         .fillMaxSize()
                         .padding(padding)
                 ) {
@@ -406,7 +430,10 @@ class MainActivity : ComponentActivity() {
                             themeMode = themeModeState.value,
                             onThemeModeChange = { themeModeState.value = it },
                             onExportPlaylists = onExportPlaylists,
-                            onImportPlaylists = onImportPlaylists
+                            onImportPlaylists = onImportPlaylists,
+                            onCreatorProfileClick = { showCreatorProfileEditor = true },
+                            creatorNickname = creatorProfile.nickname,
+                            creatorAvatarUri = creatorProfile.avatarUri
                         )
                     }
 
@@ -472,6 +499,57 @@ class MainActivity : ComponentActivity() {
                                         ShareUtils.shareAudio(context, song.uri, song.title)
                                     }
                                 }
+                            }
+                        )
+                    }
+
+                    // 创作者训练空间：作品浏览页（观众视角）——沉浸式全屏，退出返回本地音乐tab
+                    composable(Screen.CreatorFeed.route) {
+                        CreatorFeedScreen(
+                            viewModel = creatorViewModel,
+                            onPublishClick = { navController.navigate(Screen.CreatorPublish.route) },
+                            onAvatarClick = { authorId ->
+                                navController.navigate(Screen.CreatorProfile.createRoute(authorId))
+                            },
+                            onEditWork = { /* 第一阶段就地编辑暂未实现，浏览页内已可直接修改状态 */ },
+                            onExitCreatorSpace = {
+                                // 点击顶部☰按钮，返回App主"本地音乐"tab
+                                navController.navigate(Screen.Library.route) {
+                                    popUpTo(Screen.Library.route) { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            }
+                        )
+                    }
+
+                    // 创作者训练空间：作品发布页
+                    composable(Screen.CreatorPublish.route) {
+                        PublishWorkScreen(
+                            viewModel = creatorViewModel,
+                            onBack = { navController.popBackStack() },
+                            onPublished = {
+                                navController.popBackStack()
+                                navController.navigate(Screen.CreatorFeed.route) {
+                                    popUpTo(Screen.CreatorFeed.route) { inclusive = true }
+                                    launchSingleTop = true
+                                }
+                            }
+                        )
+                    }
+
+                    // 创作者训练空间：作者主页
+                    composable(
+                        route = Screen.CreatorProfile.route,
+                        arguments = listOf(navArgument("authorId") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        val authorId = backStackEntry.arguments?.getString("authorId") ?: return@composable
+                        CreatorProfileScreen(
+                            viewModel = creatorViewModel,
+                            authorId = authorId,
+                            onBack = { navController.popBackStack() },
+                            onWorkClick = { index ->
+                                creatorViewModel.setCurrentIndex(index)
+                                navController.navigate(Screen.CreatorFeed.route)
                             }
                         )
                     }

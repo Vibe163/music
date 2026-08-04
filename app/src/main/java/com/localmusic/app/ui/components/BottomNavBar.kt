@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SlowMotionVideo
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -21,6 +22,7 @@ data class BottomTab(
 val bottomTabs: List<BottomTab> = listOf(
     BottomTab("library", "本地音乐", Icons.Default.LibraryMusic),
     BottomTab("playlists_tab", "歌单", Icons.AutoMirrored.Filled.QueueMusic),
+    BottomTab("creator_feed", "创作者", Icons.Default.SlowMotionVideo),
     BottomTab("settings", "我的", Icons.Default.Settings)
 )
 

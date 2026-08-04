@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NightsStay
@@ -44,6 +45,9 @@ fun SettingsScreen(
     onThemeModeChange: (ThemeMode) -> Unit,
     onExportPlaylists: () -> Unit = {},
     onImportPlaylists: () -> Unit = {},
+    onCreatorProfileClick: () -> Unit = {},
+    creatorNickname: String = "",
+    creatorAvatarUri: String? = null,
     modifier: Modifier = Modifier
 ) {
     Scaffold(
@@ -55,6 +59,15 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            SectionTitle("创作者资料")
+            CreatorProfileRow(
+                nickname = creatorNickname,
+                avatarUri = creatorAvatarUri,
+                onClick = onCreatorProfileClick
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
             SectionTitle("外观")
             ThemeOptionRow("跟随系统", Icons.Default.Settings, themeMode == ThemeMode.SYSTEM) { onThemeModeChange(ThemeMode.SYSTEM) }
             ThemeOptionRow("浅色", Icons.Default.WbSunny, themeMode == ThemeMode.LIGHT) { onThemeModeChange(ThemeMode.LIGHT) }
@@ -160,6 +173,51 @@ private fun MigrationOptionRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge)
             Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun CreatorProfileRow(
+    nickname: String,
+    avatarUri: String?,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (avatarUri != null) {
+            coil.compose.AsyncImage(
+                model = android.net.Uri.parse(avatarUri),
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+            )
+        } else {
+            Icon(
+                Icons.Default.AccountCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(48.dp)
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                if (nickname.isNotBlank()) nickname else "点击设置",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Text(
+                "头像、昵称、简介（发布作品时自动引用）",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

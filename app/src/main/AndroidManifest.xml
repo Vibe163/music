@@ -7,6 +7,12 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- ExoPlayer setWakeMode(LOCAL) 播放时持有 PARTIAL_WAKE_LOCK 所需 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 创作者训练空间：读取系统相册（1:1抖音发布页相册）Android 13+ -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <!-- Android 12 及以下兼容 -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
 
     <application
         android:name=".LocalMusicApp"
