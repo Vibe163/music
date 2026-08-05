@@ -56,6 +56,12 @@ class MusicRepository(
         onProgress: (Int, Int) -> Unit = { _, _ -> }
     ): ImportResult = importer.importFromTree(treeUri, onProgress)
 
+    /**
+     * 导入单个外部音频文件（其他应用"打开方式"传入），返回歌曲 id。
+     * 已存在（URI/MD5 内容相同）返回已有 id，失败返回 null。
+     */
+    suspend fun importOneAndGetId(uri: Uri): Long? = importer.importOne(uri)
+
     // ---------- 歌曲 ----------
 
     suspend fun getSongById(songId: Long): Song? = songDao.getById(songId)?.toSong()

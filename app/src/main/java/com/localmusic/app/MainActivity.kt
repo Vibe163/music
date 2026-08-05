@@ -1,5 +1,6 @@
 package com.localmusic.app
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -9,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -43,7 +45,9 @@ import com.localmusic.app.data.importer.MusicMetadataEditor
 import com.localmusic.app.creator.ui.CreatorFeedScreen
 import com.localmusic.app.creator.ui.CreatorProfileScreen
 import com.localmusic.app.creator.ui.PublishWorkScreen
+import com.localmusic.app.creator.ui.UserHomeScreen
 import com.localmusic.app.creator.viewmodel.CreatorViewModel
+import com.localmusic.app.creator.viewmodel.UserHomeViewModel
 import com.localmusic.app.ui.components.AddSongsToPlaylistDialog
 import com.localmusic.app.ui.components.AddToPlaylistDialog
 import com.localmusic.app.ui.components.BottomNavBar
@@ -68,15 +72,58 @@ import com.localmusic.app.util.rememberThemeMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+
+    // activity 级 VM：处理外部"打开方式"传入的音频文件时使用（与 setContent 内 viewModel() 为同一实例）
+    private val playerViewModel: PlayerViewModel by viewModels()
+    private val libraryViewModel: LibraryViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // 处理其他应用"打开方式"传入的音频文件（如从 QQ/微信/文件管理器打开）
+        handleOpenAudioIntent(intent)
+
         setContent {
             AppContent()
+        }
+    }
+
+    // App 已在运行时从外部再次打开音频文件
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleOpenAudioIntent(intent)
+    }
+
+    /**
+     * 处理 ACTION_VIEW 音频 intent：
+     *  - 导入到曲库（URI + MD5 内容去重，已存在不重复入库）
+     *  - 导入成功后直接播放
+     */
+    private fun handleOpenAudioIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        val app = applicationContext as LocalMusicApp
+
+        libraryViewModel.importExternalAudio(uri) { songId ->
+            if (songId == null) {
+                Toast.makeText(this, "无法打开该音频文件", Toast.LENGTH_SHORT).show()
+                return@importExternalAudio
+            }
+            CoroutineScope(Dispatchers.IO).launch {
+                val song = app.repository.getSongById(songId)
+                withContext(Dispatchers.Main) {
+                    if (song != null) {
+                        playerViewModel.playSongs(listOf(song), 0)
+                        Toast.makeText(this@MainActivity, "已导入并播放", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this@MainActivity, "导入失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
         }
     }
 
@@ -345,13 +392,17 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            // 创作者空间沉浸式全屏：进入 CreatorFeed / CreatorPublish / CreatorProfile 均隐藏 App 底部导航 & MiniPlayer
-            val creatorRoutes = setOf(
+            // 创作者空间沉浸式全屏：进入 CreatorFeed / CreatorPublish / CreatorProfile / UserHome 均隐藏 App 底部导航 & MiniPlayer
+            // 带参数路由（CreatorProfile/UserHome）用 {} 前的静态前缀匹配
+            val creatorRoutePrefixes = listOf(
                 Screen.CreatorFeed.route,
-                Screen.CreatorPublish.route
+                Screen.CreatorPublish.route,
+                Screen.CreatorProfile.route.takeWhile { it != '{' },
+                Screen.UserHome.route.takeWhile { it != '{' }
             )
-            val inCreatorSpace = creatorRoutes.any { currentRoute == it || currentRoute?.startsWith(it) == true }
-                || currentRoute?.startsWith(Screen.CreatorProfile.route.takeWhile { it != '{' }) == true
+            val inCreatorSpace = creatorRoutePrefixes.any { prefix ->
+                currentRoute == prefix || currentRoute?.startsWith(prefix) == true
+            }
             val showBottomBar = !inCreatorSpace && currentRoute in setOf(
                 Screen.Library.route,
                 Screen.PlaylistsTab.route,
@@ -542,8 +593,9 @@ class MainActivity : ComponentActivity() {
                         CreatorFeedScreen(
                             viewModel = creatorViewModel,
                             onPublishClick = { navController.navigate(Screen.CreatorPublish.route) },
+                            // 点击头像 → 独立 UserHome 路由（导航栈切换，组件不叠加渲染）
                             onAvatarClick = { authorId ->
-                                navController.navigate(Screen.CreatorProfile.createRoute(authorId))
+                                navController.navigate(Screen.UserHome.createRoute(authorId))
                             },
                             onEditWork = { /* 第一阶段就地编辑暂未实现，浏览页内已可直接修改状态 */ },
                             onExitCreatorSpace = {
@@ -585,6 +637,23 @@ class MainActivity : ComponentActivity() {
                                 creatorViewModel.setCurrentIndex(index)
                                 navController.navigate(Screen.CreatorFeed.route)
                             }
+                        )
+                    }
+
+                    // 用户主页：独立路由（与播放页隔离，导航栈切换，无组件叠加）
+                    // UserHomeViewModel 纯本地数据（本地筛选/路径整理/列表缓存），无网络请求
+                    composable(
+                        route = Screen.UserHome.route,
+                        arguments = listOf(navArgument("userId") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        val userId = backStackEntry.arguments?.getString("userId") ?: return@composable
+                        val userHomeViewModel: UserHomeViewModel = viewModel(
+                            key = "user_home_$userId",
+                            factory = UserHomeViewModel.factory(userId)
+                        )
+                        UserHomeScreen(
+                            viewModel = userHomeViewModel,
+                            onBack = { navController.popBackStack() }
                         )
                     }
                 }

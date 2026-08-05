@@ -14,4 +14,8 @@ sealed class Screen(val route: String) {
     data object CreatorProfile : Screen("creator_profile/{authorId}") {
         fun createRoute(authorId: String) = "creator_profile/$authorId"
     }
+    // 用户主页（独立路由，与播放页完全隔离，避免叠加渲染）
+    data object UserHome : Screen("user_home/{userId}") {
+        fun createRoute(userId: String) = "user_home/$userId"
+    }
 }

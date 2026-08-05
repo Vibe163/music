@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.DropdownMenu
@@ -54,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.localmusic.app.data.importer.ImportResult
 import com.localmusic.app.data.model.FAVORITES_PLAYLIST_ID
 import com.localmusic.app.data.model.PlaylistWithCount
 import com.localmusic.app.data.model.Song
@@ -185,25 +187,7 @@ fun LibraryScreen(
                     )
                 }
             } else {
-                progress.lastResult?.let { result ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "已添加 ${result.added} 首，跳过 ${result.skipped} 首" +
-                                if (result.failed > 0) "，失败 ${result.failed} 首" else "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = viewModel::clearImportResult) {
-                            Text("知道了")
-                        }
-                    }
-                }
+                // 导入完成：不再显示行内提示，改为弹窗（见 Composable 末尾 ImportCompletedDialog）
             }
 
             when {
@@ -273,6 +257,14 @@ fun LibraryScreen(
                 }
             }
         }
+    }
+
+    // 导入完成弹窗：提示新增 / 重复 / 失败数量
+    progress.lastResult?.let { result ->
+        ImportCompletedDialog(
+            result = result,
+            onDismiss = viewModel::clearImportResult
+        )
     }
 }
 
@@ -475,4 +467,45 @@ private fun EmptyPlaylistState(
             }
         }
     }
+}
+
+/**
+ * 导入完成弹窗：提示新增 / 重复 / 失败数量
+ *
+ *  - 新增：成功导入的新音乐数
+ *  - 重复：因 URI 或 MD5 内容相同被跳过的数量（用户视角统一显示为"重复"）
+ *  - 失败：读取失败的极少数文件
+ */
+@Composable
+private fun ImportCompletedDialog(
+    result: ImportResult,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("导入完成") },
+        text = {
+            Column {
+                Text("成功添加 ${result.added} 首新音乐")
+                if (result.skipped > 0) {
+                    Text(
+                        "跳过 ${result.skipped} 首重复音乐",
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
+                if (result.failed > 0) {
+                    Text(
+                        "失败 ${result.failed} 首",
+                        modifier = Modifier.padding(top = 6.dp),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("知道了")
+            }
+        }
+    )
 }

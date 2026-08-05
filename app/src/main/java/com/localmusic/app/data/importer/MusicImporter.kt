@@ -108,6 +108,27 @@ class MusicImporter(
 
     private enum class ImportStatus { Added, Skipped, Failed }
 
+    /**
+     * 导入单个外部音频文件（如从 QQ/微信/文件管理器通过"打开方式"传入），返回歌曲 id。
+     *  - 已存在（URI 或 MD5 内容相同）→ 返回已有歌曲 id（可直接播放）
+     *  - 新增成功 → 返回新 id
+     *  - 读取失败 → null
+     */
+    suspend fun importOne(uri: Uri): Long? = withContext(Dispatchers.IO) {
+        val uriString = uri.toString()
+        songDao.getIdByUri(uriString)?.let { return@withContext it }
+
+        // 外部 intent 传入的 uri 通常只有临时读权限，持久化以便重启后仍可播放
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
+
+        readMetadataAndInsert(uri, uriString)?.id
+    }
+
     private suspend fun importSingle(uri: Uri, persistPermission: Boolean = true): ImportStatus {
         val uriString = uri.toString()
         if (songDao.getIdByUri(uriString) != null) return ImportStatus.Skipped
@@ -133,6 +154,17 @@ class MusicImporter(
             }
         }
 
+        val result = readMetadataAndInsert(uri, uriString) ?: return ImportStatus.Failed
+        return if (result.existed) ImportStatus.Skipped else ImportStatus.Added
+    }
+
+    /**
+     * 读取元数据 → 计算 MD5 内容指纹 → 去重 → 插入，返回歌曲 id。
+     *  - URI 已存在 / MD5 内容相同 → 返回已有 id（existed = true）
+     *  - 新增成功 → 返回新 id（existed = false）
+     *  - 读取失败 → null
+     */
+    private suspend fun readMetadataAndInsert(uri: Uri, uriString: String): InsertResult? {
         val retriever = MediaMetadataRetriever()
         val metadata: Metadata? = try {
             retriever.setDataSource(context, uri)
@@ -153,10 +185,15 @@ class MusicImporter(
             runCatching { retriever.release() }
         }
 
-        val meta = metadata ?: return ImportStatus.Failed
+        val meta = metadata ?: return null
 
-        // 计算文件 MD5 用于迁移匹配
+        // 内容级去重：不同批次重新下载的同一首歌（URI 不同但内容相同）→ 返回已有记录
+        // 例如：抖音一批批下载到 Download 文件夹，文件名带序号变化，URI 每次不同，
+        // 仅按 URI 去重识别不了；MD5 相同即判定为同一首歌，避免重复入库
         val md5 = FileHashUtils.computeMd5(context, uri)
+        if (md5 != null) {
+            songDao.findByMd5(md5)?.let { return InsertResult(it.id, existed = true) }
+        }
 
         val newId = songDao.insert(
             SongEntity(
@@ -169,15 +206,17 @@ class MusicImporter(
                 md5 = md5
             )
         )
-        if (newId <= 0) return ImportStatus.Skipped
+        if (newId <= 0) return null
 
         // 提取封面并立即降采样为 300×300 缩略图
         meta.artBytes?.let { bytes ->
             val path = saveAlbumArtThumbnail(newId, bytes)
             if (path != null) songDao.updateAlbumArtPath(newId, path)
         }
-        return ImportStatus.Added
+        return InsertResult(newId, existed = false)
     }
+
+    private data class InsertResult(val id: Long, val existed: Boolean)
 
     /**
      * 将原始内嵌封面字节降采样为 thumbSize×thumbSize JPEG 缩略图。

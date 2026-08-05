@@ -160,6 +160,17 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /**
+     * 外部应用"打开方式"传入单个音频文件：导入（URI + MD5 内容去重）并返回歌曲 id。
+     * 成功后由调用方播放；已存在则返回已有 id（不重复入库）。
+     */
+    fun importExternalAudio(uri: Uri, onResult: (Long?) -> Unit = {}) {
+        viewModelScope.launch {
+            val id = repository.importOneAndGetId(uri)
+            onResult(id)
+        }
+    }
+
     fun clearImportResult() {
         _importProgress.value = _importProgress.value.copy(lastResult = null)
     }
