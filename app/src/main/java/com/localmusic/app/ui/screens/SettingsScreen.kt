@@ -8,10 +8,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Settings
@@ -45,6 +49,8 @@ fun SettingsScreen(
     onThemeModeChange: (ThemeMode) -> Unit,
     onExportPlaylists: () -> Unit = {},
     onImportPlaylists: () -> Unit = {},
+    onOpenImportLogs: () -> Unit = {},
+    onCheckDuplicates: () -> Unit = {},
     onCreatorProfileClick: () -> Unit = {},
     creatorNickname: String = "",
     creatorAvatarUri: String? = null,
@@ -57,6 +63,7 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(padding)
         ) {
             SectionTitle("创作者资料")
@@ -87,6 +94,18 @@ fun SettingsScreen(
                 description = "从 JSON 文件恢复歌单分类，自动匹配本地歌曲",
                 icon = Icons.Default.Download,
                 onClick = onImportPlaylists
+            )
+            MigrationOptionRow(
+                label = "导入日志",
+                description = "查看每次导入时重复和失败的歌曲",
+                icon = Icons.Default.History,
+                onClick = onOpenImportLogs
+            )
+            MigrationOptionRow(
+                label = "检查重复歌曲",
+                description = "扫描曲库中的重复歌曲，可选择仅删除曲库或连文件一起删",
+                icon = Icons.Default.CleaningServices,
+                onClick = onCheckDuplicates
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))

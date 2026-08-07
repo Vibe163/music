@@ -57,4 +57,8 @@ interface PlaylistDao {
     /** 统计指定歌单的歌曲数量。 */
     @Query("SELECT COUNT(*) FROM playlist_songs WHERE playlistId = :playlistId")
     suspend fun countSongsInPlaylist(playlistId: Long): Int
+
+    /** 从所有歌单中移除某首歌的关联（删除歌曲时同步清理）。 */
+    @Query("DELETE FROM playlist_songs WHERE songId = :songId")
+    suspend fun deleteSongFromAllPlaylists(songId: Long)
 }

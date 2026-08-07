@@ -17,12 +17,31 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -31,8 +50,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -41,13 +64,15 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.localmusic.app.data.model.Song
+import com.localmusic.app.data.model.SongEntity
+import com.localmusic.app.data.model.toSong
 import com.localmusic.app.data.importer.MusicMetadataEditor
 import com.localmusic.app.creator.ui.CreatorFeedScreen
 import com.localmusic.app.creator.ui.CreatorProfileScreen
 import com.localmusic.app.creator.ui.PublishWorkScreen
-import com.localmusic.app.creator.ui.UserHomeScreen
+import com.localmusic.app.creator.viewmodel.CreatorProfileViewModel
 import com.localmusic.app.creator.viewmodel.CreatorViewModel
-import com.localmusic.app.creator.viewmodel.UserHomeViewModel
+import com.localmusic.app.player.PlayerUiState
 import com.localmusic.app.ui.components.AddSongsToPlaylistDialog
 import com.localmusic.app.ui.components.AddToPlaylistDialog
 import com.localmusic.app.ui.components.BottomNavBar
@@ -56,9 +81,11 @@ import com.localmusic.app.ui.components.EditSongInfoDialog
 import com.localmusic.app.ui.components.ImportResultDialog
 import com.localmusic.app.ui.components.MiniPlayerBar
 import com.localmusic.app.ui.navigation.Screen
+import com.localmusic.app.ui.screens.ImportLogsScreen
 import com.localmusic.app.ui.screens.LibraryScreen
 import com.localmusic.app.ui.screens.NowPlayingScreen
 import com.localmusic.app.ui.screens.PlaylistDetailScreen
+import com.localmusic.app.util.formatDuration
 import com.localmusic.app.ui.screens.PlaylistsScreen
 import com.localmusic.app.ui.screens.SettingsScreen
 import com.localmusic.app.ui.theme.LocalMusicTheme
@@ -149,6 +176,7 @@ class MainActivity : ComponentActivity() {
             var showAddSongsDialog by remember { mutableStateOf(false) }
             var showImportResultDialog by remember { mutableStateOf(false) }
             var showCreatorProfileEditor by remember { mutableStateOf(false) }
+            var showDuplicateDialog by remember { mutableStateOf(false) }
             val context = LocalContext.current
 
             val creatorProfile by creatorViewModel.userProfile.collectAsState()
@@ -231,6 +259,9 @@ class MainActivity : ComponentActivity() {
             val onSongAddToPlaylist: (Song) -> Unit = remember {
                 { song: Song -> songToAdd = song }
             }
+            val onPlayNextSong: (Song) -> Unit = remember {
+                { song: Song -> playerViewModel.playNextInQueue(song) }
+            }
             val onEditSong: (Song) -> Unit = remember {
                 { song: Song -> songToEdit = song }
             }
@@ -285,14 +316,20 @@ class MainActivity : ComponentActivity() {
 
             DisposableEffect(Unit) {
                 playerViewModel.connect()
-                // 注入播放完成回调：自动累计播放次数
+                // 注入播放完成回调：自动累计播放次数 + 刷新最近播放时间戳
                 playerViewModel.setOnSongCompletedListener { song ->
                     libraryViewModel.incrementPlayCount(song.id) { refreshed ->
                         playerViewModel.updateSongInQueue(refreshed)
                     }
+                    libraryViewModel.markRecentlyPlayed(song.id)
+                }
+                // 注入开始播放回调：记录最近播放（开始播放/切歌即记录，无需播完）
+                playerViewModel.setOnSongStartedListener { song ->
+                    libraryViewModel.markRecentlyPlayed(song.id)
                 }
                 onDispose {
                     playerViewModel.setOnSongCompletedListener(null)
+                    playerViewModel.setOnSongStartedListener(null)
                     playerViewModel.disconnect()
                 }
             }
@@ -320,15 +357,18 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            // 当前歌单（非主收藏）添加歌曲对话框
-            val allLibrarySongs by libraryViewModel.currentPlaylistSongs.collectAsState()
+            // 当前歌单（用户歌单）添加歌曲对话框
+            val allLibrarySongs by libraryViewModel.librarySongs.collectAsState()
             if (showAddSongsDialog) {
                 AddSongsToPlaylistDialog(
                     allSongs = allLibrarySongs,
                     existingIds = currentPlaylistSongs.map { it.id }.toSet(),
                     onConfirm = { ids ->
                         val currentId = libraryViewModel.uiState.value.currentPlaylistId
-                        if (currentId != com.localmusic.app.data.model.FAVORITES_PLAYLIST_ID) {
+                        if (currentId != com.localmusic.app.data.model.FAVORITES_PLAYLIST_ID &&
+                            currentId != com.localmusic.app.data.model.ALL_SONGS_PLAYLIST_ID &&
+                            currentId != com.localmusic.app.data.model.RECENTLY_PLAYED_PLAYLIST_ID
+                        ) {
                             libraryViewModel.addSongsToPlaylist(currentId, ids)
                         }
                         showAddSongsDialog = false
@@ -384,6 +424,174 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            // 重复歌曲确认删除弹窗：列出重复项，用户选择「仅删曲库」或「连文件一起删」
+            val duplicateGroups by libraryViewModel.duplicateGroups.collectAsState()
+            val duplicateScanning by libraryViewModel.duplicateScanning.collectAsState()
+            val scanProgress by libraryViewModel.scanProgress.collectAsState()
+
+            // 重复扫描进行中：进度弹窗
+            if (showDuplicateDialog && duplicateScanning) {
+                AlertDialog(
+                    onDismissRequest = { showDuplicateDialog = false },
+                    title = { Text("正在扫描曲库") },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                            Text(
+                                "正在比对文件内容 ${scanProgress.first}/${scanProgress.second} 首",
+                                modifier = Modifier.padding(start = 12.dp)
+                            )
+                        }
+                    },
+                    confirmButton = {},
+                    dismissButton = {
+                        TextButton(onClick = { showDuplicateDialog = false }) { Text("取消") }
+                    }
+                )
+            } else if (showDuplicateDialog && duplicateGroups.isNotEmpty()) {
+                val totalDuplicates = duplicateGroups.sumOf { it.duplicates.size }
+                AlertDialog(
+                    onDismissRequest = {
+                        showDuplicateDialog = false
+                        libraryViewModel.clearDuplicateGroups()
+                    },
+                    title = { Text("发现 $totalDuplicates 首重复歌曲（${duplicateGroups.size} 组）") },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .heightIn(max = 400.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            Text(
+                                "点击任意一行即可试听，确认后再选择删除方式",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            duplicateGroups.forEachIndexed { index, group ->
+                                if (index > 0) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(vertical = 8.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant
+                                    )
+                                }
+                                val keepPlaying = isThisSongPlaying(playerState, group.keep.id)
+                                // 保留项
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { playDuplicatePreview(playerViewModel, playerState, group.keep) }
+                                ) {
+                                    Icon(
+                                        imageVector = if (keepPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                        contentDescription = if (keepPlaying) "暂停" else "试听",
+                                        tint = if (keepPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        " 组${index + 1} 保留",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        "  ${shortTitle(group.keep.title)}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = true)
+                                    )
+                                    Text(
+                                        formatDuration(group.keep.duration),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                // 每条重复项 + 命中理由
+                                group.duplicates.forEach { dup ->
+                                    val dupPlaying = isThisSongPlaying(playerState, dup.song.id)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { playDuplicatePreview(playerViewModel, playerState, dup.song) }
+                                    ) {
+                                        Icon(
+                                            imageVector = if (dupPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                            contentDescription = if (dupPlaying) "暂停" else "试听",
+                                            tint = if (dupPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                            modifier = Modifier.padding(start = 12.dp).size(16.dp)
+                                        )
+                                        Text(
+                                            "  ${shortTitle(dup.song.title)}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (dupPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = true)
+                                        )
+                                        Text(
+                                            formatDuration(dup.song.duration),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Text(
+                                        "  ${dup.reason}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(start = 24.dp, bottom = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                libraryViewModel.removeDuplicateGroups(deleteFiles = true) { removed ->
+                                    showDuplicateDialog = false
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "已删除 $removed 首重复歌曲（含文件）",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        ) {
+                            Text("删除曲库+文件", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    dismissButton = {
+                        Row {
+                            TextButton(
+                                onClick = {
+                                    libraryViewModel.removeDuplicateGroups(deleteFiles = false) { removed ->
+                                        showDuplicateDialog = false
+                                        Toast.makeText(
+                                            this@MainActivity,
+                                            "已删除 $removed 首重复歌曲（仅曲库）",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            ) {
+                                Text("仅删除曲库")
+                            }
+                            TextButton(
+                                onClick = {
+                                    showDuplicateDialog = false
+                                    libraryViewModel.clearDuplicateGroups()
+                                }
+                            ) {
+                                Text("取消")
+                            }
+                        }
+                    }
+                )
+            }
+
             // 创作者资料编辑弹窗（在「我的」页面触发）
             if (showCreatorProfileEditor) {
                 com.localmusic.app.creator.ui.components.CreatorProfileEditorDialog(
@@ -392,13 +600,12 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            // 创作者空间沉浸式全屏：进入 CreatorFeed / CreatorPublish / CreatorProfile / UserHome 均隐藏 App 底部导航 & MiniPlayer
-            // 带参数路由（CreatorProfile/UserHome）用 {} 前的静态前缀匹配
+            // 创作者空间沉浸式全屏：进入 CreatorFeed / CreatorPublish / CreatorProfile 均隐藏 App 底部导航 & MiniPlayer
+            // 带参数路由（CreatorProfile）用 {} 前的静态前缀匹配
             val creatorRoutePrefixes = listOf(
                 Screen.CreatorFeed.route,
                 Screen.CreatorPublish.route,
-                Screen.CreatorProfile.route.takeWhile { it != '{' },
-                Screen.UserHome.route.takeWhile { it != '{' }
+                Screen.CreatorProfile.route.takeWhile { it != '{' }
             )
             val inCreatorSpace = creatorRoutePrefixes.any { prefix ->
                 currentRoute == prefix || currentRoute?.startsWith(prefix) == true
@@ -436,7 +643,9 @@ class MainActivity : ComponentActivity() {
                                 positionMs = positionMs,
                                 onPlayPause = playerViewModel::togglePlayPause,
                                 onNext = playerViewModel::skipToNext,
-                                onClick = onMiniPlayerClick
+                                onPrevious = playerViewModel::previousOrRestart,
+                                onClick = onMiniPlayerClick,
+                                onSeek = playerViewModel::seekTo
                             )
                         }
                         if (showBottomBar) {
@@ -485,12 +694,12 @@ class MainActivity : ComponentActivity() {
                             viewModel = libraryViewModel,
                             onSongClick = onSongClick,
                             onSongAddToPlaylist = onSongAddToPlaylist,
+                            onPlayNextSong = onPlayNextSong,
                             onEditSong = onEditSong,
                             onRemoveSong = onRemoveSong,
                             onToggleFavorite = onToggleFavorite,
                             onShareSong = onShareSong,
                             onPlayAll = onPlayAll,
-                            onShuffleAll = onShuffleAll,
                             onCreatePlaylist = onCreatePlaylist,
                             onAddSongsToPlaylist = onAddSongsToPlaylist,
                             onPickFiles = onPickFiles,
@@ -516,9 +725,37 @@ class MainActivity : ComponentActivity() {
                             onThemeModeChange = { themeModeState.value = it },
                             onExportPlaylists = onExportPlaylists,
                             onImportPlaylists = onImportPlaylists,
+                            onOpenImportLogs = {
+                                navController.navigate(Screen.ImportLogs.route)
+                            },
+                            onCheckDuplicates = {
+                                showDuplicateDialog = true
+                                libraryViewModel.checkDuplicates { count ->
+                                    if (count == 0 && showDuplicateDialog) {
+                                        showDuplicateDialog = false
+                                        val unreadable = libraryViewModel.lastScanUnreadable.value
+                                        Toast.makeText(
+                                            this@MainActivity,
+                                            if (unreadable > 0) {
+                                                "没有发现重复歌曲（$unreadable 首文件无法读取，未参与内容比对）"
+                                            } else {
+                                                "没有发现重复歌曲"
+                                            },
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
+                            },
                             onCreatorProfileClick = { showCreatorProfileEditor = true },
                             creatorNickname = creatorProfile.nickname,
                             creatorAvatarUri = creatorProfile.avatarUri
+                        )
+                    }
+
+                    composable(Screen.ImportLogs.route) {
+                        ImportLogsScreen(
+                            viewModel = libraryViewModel,
+                            onBack = { navController.popBackStack() }
                         )
                     }
 
@@ -543,15 +780,18 @@ class MainActivity : ComponentActivity() {
                             onEditSong = onEditSong,
                             onToggleFavorite = onToggleFavorite,
                             onShareSong = onShareSong,
+                            onPlayNextSong = onPlayNextSong,
                             onPlayAll = {
                                 playerViewModel.playSongs(detailState.songs, 0)
                             },
                             onShuffle = {
                                 playerViewModel.playShuffled(detailState.songs)
                             },
-                            onAddSongs = { showAddSongs = true },
-                            onPickFiles = { pickFilesLauncher.launch(arrayOf("audio/*")) },
-                            onPickFolder = { pickFolderLauncher.launch(null) }
+                            onAddSongs = { if (!detailState.isFavorites) showAddSongs = true },
+                            onDeletePlaylist = {
+                                libraryViewModel.deletePlaylist(playlistId)
+                                navController.popBackStack()
+                            }
                         )
 
                         if (showAddSongs) {
@@ -593,9 +833,10 @@ class MainActivity : ComponentActivity() {
                         CreatorFeedScreen(
                             viewModel = creatorViewModel,
                             onPublishClick = { navController.navigate(Screen.CreatorPublish.route) },
-                            // 点击头像 → 独立 UserHome 路由（导航栈切换，组件不叠加渲染）
+                            // 点击头像 → 创作者个人主页（独立全屏层，从底部滑入；下层视频流自动暂停）
                             onAvatarClick = { authorId ->
-                                navController.navigate(Screen.UserHome.createRoute(authorId))
+                                creatorViewModel.setProfileOpen(true)
+                                navController.navigate(Screen.CreatorProfile.createRoute(authorId))
                             },
                             onEditWork = { /* 第一阶段就地编辑暂未实现，浏览页内已可直接修改状态 */ },
                             onExitCreatorSpace = {
@@ -623,41 +864,78 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    // 创作者训练空间：作者主页
+                    // 创作者训练空间：作者主页（独立全屏层：从底部滑入/向下滑出，不透明背景避免与视频流混合）
                     composable(
                         route = Screen.CreatorProfile.route,
-                        arguments = listOf(navArgument("authorId") { type = NavType.StringType })
+                        arguments = listOf(navArgument("authorId") { type = NavType.StringType }),
+                        enterTransition = {
+                            slideInVertically(
+                                initialOffsetY = { it },
+                                animationSpec = tween(320, easing = FastOutSlowInEasing)
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutVertically(
+                                targetOffsetY = { it },
+                                animationSpec = tween(320, easing = FastOutSlowInEasing)
+                            )
+                        }
                     ) { backStackEntry ->
                         val authorId = backStackEntry.arguments?.getString("authorId") ?: return@composable
+                        val profileViewModel: CreatorProfileViewModel = viewModel(
+                            key = "creator_profile_$authorId",
+                            factory = CreatorProfileViewModel.factory(authorId)
+                        )
                         CreatorProfileScreen(
-                            viewModel = creatorViewModel,
-                            authorId = authorId,
+                            profileViewModel = profileViewModel,
+                            creatorViewModel = creatorViewModel,
                             onBack = { navController.popBackStack() },
                             onWorkClick = { index ->
+                                creatorViewModel.setProfileOpen(false)
                                 creatorViewModel.setCurrentIndex(index)
                                 navController.navigate(Screen.CreatorFeed.route)
                             }
                         )
                     }
-
-                    // 用户主页：独立路由（与播放页隔离，导航栈切换，无组件叠加）
-                    // UserHomeViewModel 纯本地数据（本地筛选/路径整理/列表缓存），无网络请求
-                    composable(
-                        route = Screen.UserHome.route,
-                        arguments = listOf(navArgument("userId") { type = NavType.StringType })
-                    ) { backStackEntry ->
-                        val userId = backStackEntry.arguments?.getString("userId") ?: return@composable
-                        val userHomeViewModel: UserHomeViewModel = viewModel(
-                            key = "user_home_$userId",
-                            factory = UserHomeViewModel.factory(userId)
-                        )
-                        UserHomeScreen(
-                            viewModel = userHomeViewModel,
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
                 }
             }
         }
+    }
+}
+
+// 抖音文件名 → 精简标题：@账号_日期_@账号创作的原声 → "@账号 创作的原声"；@账号_日期_歌名 → 歌名；普通文件 → 基名
+private val douyinNameRegex = Regex("^(@.*?)_(\\d{8}(?:\\d{6})?)_(.+)$")
+private val originalSoundRegex = Regex("(.+?)(创作的原声|用户创作的原声|原创)$")
+
+private fun shortTitle(title: String): String {
+    val base = title.substringBeforeLast('.')
+    val m = douyinNameRegex.find(base)
+    if (m != null) {
+        val account = m.groupValues[1]
+        val rest = m.groupValues[3]
+        if (originalSoundRegex.containsMatchIn(rest)) {
+            return "$account 创作的原声"
+        }
+        return rest.removePrefix("@")
+    }
+    // 歌名-歌手-歌曲ID-码率
+    val m2 = Regex("^(.+)-[^-]+-\\d+-\\d+$").find(base)
+    return m2?.groupValues?.get(1) ?: base
+}
+
+/** 该歌曲是否正在弹窗试听中。 */
+private fun isThisSongPlaying(playerState: PlayerUiState, songId: Long): Boolean =
+    playerState.currentSong?.id == songId && playerState.isPlaying
+
+/** 弹窗内点击试听：正在播放则暂停，否则从该曲开始播放。 */
+private fun playDuplicatePreview(
+    playerViewModel: PlayerViewModel,
+    playerState: PlayerUiState,
+    song: SongEntity
+) {
+    if (playerState.currentSong?.id == song.id && playerState.isPlaying) {
+        playerViewModel.togglePlayPause()
+    } else {
+        playerViewModel.playSongs(listOf(song.toSong()), 0)
     }
 }

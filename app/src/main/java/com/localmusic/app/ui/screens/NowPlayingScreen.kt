@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -30,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MusicNote
@@ -42,6 +44,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -71,7 +74,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -113,6 +118,7 @@ fun NowPlayingScreen(
     var showQueue by remember { mutableStateOf(false) }
     var showVolume by remember { mutableStateOf(false) }
     var showSleepTimer by remember { mutableStateOf(false) }
+    var showSpeed by remember { mutableStateOf(false) }
     var sleepSelectedOption by remember { mutableStateOf(-1) }
 
     var dominantColor by remember { mutableStateOf(Color(0xFF1E1E1E)) }
@@ -164,16 +170,11 @@ fun NowPlayingScreen(
             topBar = {
                 TopAppBar(
                     title = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = if (song?.album.isNullOrBlank() || song?.album == "未知专辑") "正在播放"
-                                else song?.album ?: "正在播放",
-                                color = Color.White,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                        Text(
+                            text = "正在播放",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium
+                        )
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
@@ -209,6 +210,7 @@ fun NowPlayingScreen(
                         .padding(horizontal = 24.dp, vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    Spacer(Modifier.weight(0.4f))
                     // Cover with swipe gestures
                     CoverWithSwipe(
                         artPath = song.albumArtPath,
@@ -228,31 +230,37 @@ fun NowPlayingScreen(
                     ) {
                         Text(
                             text = song.title,
-                            style = MaterialTheme.typography.headlineSmall,
+                            style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center,
-                            lineHeight = 28.sp
+                            lineHeight = 32.sp
                         )
-                        Spacer(Modifier.height(6.dp))
+                        Spacer(Modifier.height(8.dp))
                         Text(
-                            text = buildString {
-                                append(song.artist.ifBlank { "未知艺术家" })
-                                if (song.album.isNotBlank() && song.album != "未知专辑") {
-                                    append(" · ")
-                                    append(song.album)
-                                }
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.75f),
+                            text = song.artist.ifBlank { "未知艺术家" },
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.White.copy(alpha = 0.85f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        if (song.album.isNotBlank() && song.album != "未知专辑") {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = song.album,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.55f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(Modifier.height(12.dp))
 
                         Row(
-                            modifier = Modifier.padding(top = 10.dp),
+                            modifier = Modifier.padding(top = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
@@ -280,7 +288,7 @@ fun NowPlayingScreen(
                                     color = Color.White.copy(alpha = 0.1f)
                                 ) {
                                     Text(
-                                        text = "▶ ${song.playCount}",
+                                        text = "已播放 ${song.playCount} 次",
                                         style = MaterialTheme.typography.labelMedium,
                                         color = Color.White.copy(alpha = 0.75f),
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
@@ -309,10 +317,11 @@ fun NowPlayingScreen(
                         vibrantColor = vibrantColor,
                         onSleepTimerClick = { showSleepTimer = true },
                         onVolumeClick = { showVolume = true },
+                        onSpeedClick = { showSpeed = true },
                         sleepRemaining = sleepRemaining
                     )
 
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.weight(0.6f))
                 }
             }
         }
@@ -326,6 +335,11 @@ fun NowPlayingScreen(
             onDismiss = { showQueue = false },
             onSongClick = { index ->
                 viewModel.playSongs(playerState.queue, index)
+                showQueue = false
+            },
+            onRemove = viewModel::removeFromQueue,
+            onClear = {
+                viewModel.clearQueue()
                 showQueue = false
             }
         )
@@ -361,6 +375,18 @@ fun NowPlayingScreen(
             onDismiss = { showSleepTimer = false }
         )
     }
+
+    // Speed sheet
+    if (showSpeed) {
+        SpeedSheet(
+            currentSpeed = playerState.playbackSpeed,
+            onSelect = { speed ->
+                viewModel.setPlaybackSpeed(speed)
+                showSpeed = false
+            },
+            onDismiss = { showSpeed = false }
+        )
+    }
 }
 
 @Composable
@@ -388,55 +414,67 @@ private fun CoverWithSwipe(
         label = "cover_rotation"
     )
 
+    // 布局：外层容器承载可拖拽+背景光晕，内层封面单独旋转
     Box(
-        modifier = Modifier
-            .size(coverSizeDp.dp)
-            .shadow(24.dp, RoundedCornerShape(28.dp), clip = false)
-            .graphicsLayer {
-                rotationZ = rotation
-                translationX = offsetX
-                alpha = 1f - (abs(offsetX) / 600f)
-            }
-            .clip(RoundedCornerShape(28.dp))
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragStart = { isUserInteracting = true },
-                    onDragEnd = {
-                        isUserInteracting = false
-                        offsetX = 0f
-                    },
-                    onDragCancel = {
-                        isUserInteracting = false
-                        offsetX = 0f
-                    },
-                    onHorizontalDrag = { change, dragAmount ->
-                        change.consume()
-                        val newOffset = (offsetX + dragAmount).coerceIn(-400f, 400f)
-                        offsetX = newOffset
-                        if (offsetX < -120f) {
-                            onSwipeLeft()
-                            offsetX = 0f
-                        } else if (offsetX > 120f) {
-                            onSwipeRight()
-                            offsetX = 0f
-                        }
-                    }
-                )
-            },
+        modifier = Modifier.size((coverSizeDp * 1.22f).dp),
         contentAlignment = Alignment.Center
     ) {
+        // 背面氛围光晕：静止，随封面主色呼吸
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            vibrantColor.copy(alpha = 0.75f),
-                            vibrantColor.copy(alpha = 0.35f),
-                            vibrantColor.copy(alpha = 0.15f)
-                        )
+                .drawBehind {
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                vibrantColor.copy(alpha = 0.34f),
+                                vibrantColor.copy(alpha = 0.10f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width / 2f, size.height / 2f),
+                            radius = size.width * 0.46f
+                        ),
+                        radius = size.width * 0.46f
                     )
-                ),
+                }
+                .graphicsLayer { alpha = 1f - (abs(offsetX) / 600f) }
+        )
+
+        Box(
+            modifier = Modifier
+                .size(coverSizeDp.dp)
+                .shadow(28.dp, RoundedCornerShape(30.dp), clip = false, ambientColor = Color(0x66000000))
+                .graphicsLayer {
+                    rotationZ = rotation
+                    translationX = offsetX
+                    alpha = 1f - (abs(offsetX) / 600f)
+                }
+                .clip(RoundedCornerShape(30.dp))
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { isUserInteracting = true },
+                        onDragEnd = {
+                            isUserInteracting = false
+                            offsetX = 0f
+                        },
+                        onDragCancel = {
+                            isUserInteracting = false
+                            offsetX = 0f
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            val newOffset = (offsetX + dragAmount).coerceIn(-400f, 400f)
+                            offsetX = newOffset
+                            if (offsetX < -120f) {
+                                onSwipeLeft()
+                                offsetX = 0f
+                            } else if (offsetX > 120f) {
+                                onSwipeRight()
+                                offsetX = 0f
+                            }
+                        }
+                    )
+                },
             contentAlignment = Alignment.Center
         ) {
             if (!artPath.isNullOrBlank()) {
@@ -444,20 +482,18 @@ private fun CoverWithSwipe(
                     model = artPath,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(6.dp)
-                        .clip(RoundedCornerShape(24.dp))
+                    modifier = Modifier.fillMaxSize()
                 )
             } else {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
-                            Brush.radialGradient(
+                            Brush.verticalGradient(
                                 colors = listOf(
-                                    vibrantColor.copy(alpha = 0.6f),
-                                    vibrantColor.copy(alpha = 0.2f)
+                                    vibrantColor.copy(alpha = 0.85f),
+                                    vibrantColor.copy(alpha = 0.55f),
+                                    vibrantColor.copy(alpha = 0.30f)
                                 )
                             )
                         ),
@@ -466,11 +502,18 @@ private fun CoverWithSwipe(
                     Icon(
                         imageVector = Icons.Default.MusicNote,
                         contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.85f),
-                        modifier = Modifier.size((coverSizeDp * 0.45f).dp)
+                        tint = Color.White.copy(alpha = 0.9f),
+                        modifier = Modifier.size((coverSizeDp * 0.42f).dp)
                     )
                 }
             }
+            // 边缘高光描边：提亮封面轮廓，营造"玻璃唱片"质感
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(30.dp))
+                    .border(1.5.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(30.dp))
+            )
         }
     }
 }
@@ -580,6 +623,7 @@ private fun ControlsRow(
     vibrantColor: Color,
     onSleepTimerClick: () -> Unit,
     onVolumeClick: () -> Unit,
+    onSpeedClick: () -> Unit,
     sleepRemaining: Long
 ) {
     val activeColor = vibrantColor
@@ -646,7 +690,7 @@ private fun ControlsRow(
         )
     }
 
-    // Bottom row: volume + sleep timer
+    // Bottom row: volume + speed + sleep timer
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -658,6 +702,14 @@ private fun ControlsRow(
             label = "音量",
             onClick = onVolumeClick,
             activeColor = activeColor
+        )
+        val speed = playerState.playbackSpeed
+        BottomActionButton(
+            icon = Icons.Default.Speed,
+            label = if (speed != 1.0f) "${speed}x" else "倍速",
+            onClick = onSpeedClick,
+            activeColor = activeColor,
+            isActive = speed != 1.0f
         )
         BottomActionButton(
             icon = Icons.Default.Schedule,
@@ -803,7 +855,9 @@ private fun QueueSheet(
     queue: List<com.localmusic.app.data.model.Song>,
     currentIndex: Int,
     onDismiss: () -> Unit,
-    onSongClick: (Int) -> Unit
+    onSongClick: (Int) -> Unit,
+    onRemove: (Long) -> Unit,
+    onClear: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
     ModalBottomSheet(
@@ -812,19 +866,48 @@ private fun QueueSheet(
         containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = "播放队列 (${queue.size})",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "播放队列 (${queue.size})",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = "向左滑动歌曲可移除 · 也可点击右侧按钮",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(onClick = onClear) {
+                    Text("清空队列", color = MaterialTheme.colorScheme.error)
+                }
+            }
             LazyColumn(modifier = Modifier.fillMaxHeight(0.6f)) {
                 itemsIndexed(queue, key = { _, s -> s.id }, contentType = { _, _ -> "song" }) { index, queueSong ->
                     val onClick = { onSongClick(index) }
-                    SongListItem(
-                        song = queueSong,
-                        isActive = index == currentIndex,
-                        onClick = onClick
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SongListItem(
+                            song = queueSong,
+                            isActive = index == currentIndex,
+                            onClick = onClick,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { onRemove(queueSong.id) },
+                            modifier = Modifier.padding(end = 4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "从队列移除",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
             Spacer(Modifier.height(24.dp))
@@ -953,6 +1036,77 @@ private fun SleepTimerSheet(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("取消定时", color = MaterialTheme.colorScheme.error)
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SpeedSheet(
+    currentSpeed: Float,
+    onSelect: (Float) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState()
+    val options = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+    val labels = mapOf(
+        0.5f to "0.5x 半速",
+        0.75f to "0.75x",
+        1.0f to "1.0x 正常",
+        1.25f to "1.25x",
+        1.5f to "1.5x",
+        2.0f to "2.0x 倍速"
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)
+        ) {
+            Text(
+                text = "播放速度",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = "当前 ${currentSpeed}x",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            Spacer(Modifier.height(16.dp))
+            options.forEach { speed ->
+                val isSelected = currentSpeed == speed
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                            else Color.Transparent
+                        )
+                        .clickable { onSelect(speed) }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = labels[speed] ?: "${speed}x",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isSelected) {
+                        Text(
+                            text = "✓",
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(24.dp))

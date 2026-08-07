@@ -44,8 +44,8 @@ class PlaylistDetailViewModel(
     init {
         viewModelScope.launch {
             if (playlistId == FAVORITES_PLAYLIST_ID) {
-                // 主收藏 = 整个曲库
-                repository.observeSongs().map { list -> list.map { it.toSong() } }
+                // 主收藏 = 红心收藏的歌曲
+                repository.observeFavoriteSongs().map { list -> list.map { it.toSong() } }
                     .collect { songs ->
                         _uiState.value = PlaylistDetailUiState(
                             playlistName = "主收藏",
@@ -81,11 +81,11 @@ class PlaylistDetailViewModel(
         }
     }
 
-    /** 移除歌曲：主收藏 → 从曲库删除；用户歌单 → 仅解除关联。 */
+    /** 移除歌曲：主收藏 → 取消红心收藏；用户歌单 → 仅解除关联。 */
     fun removeSong(songId: Long) {
         viewModelScope.launch {
             if (playlistId == FAVORITES_PLAYLIST_ID) {
-                repository.deleteSong(songId)
+                repository.toggleFavorite(songId, false)
             } else {
                 repository.removeSongFromPlaylist(playlistId, songId)
             }

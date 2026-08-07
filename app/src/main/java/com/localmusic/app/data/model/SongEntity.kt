@@ -24,7 +24,9 @@ data class SongEntity(
     val dateAdded: Long = System.currentTimeMillis(),
     val playCount: Int = 0,
     val favorite: Boolean = false,
-    val md5: String? = null
+    val md5: String? = null,
+    /** 最近一次播放完成时间戳；0 = 从未播放（最近播放列表 = lastPlayedAt > 0 按此倒序）。 */
+    val lastPlayedAt: Long = 0
 )
 
 /** 转换为播放器/UI 使用的领域模型。 */

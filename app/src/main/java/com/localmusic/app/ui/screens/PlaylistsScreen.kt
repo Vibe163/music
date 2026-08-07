@@ -15,10 +15,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -35,6 +36,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.localmusic.app.data.model.ALL_SONGS_PLAYLIST_ID
+import com.localmusic.app.data.model.FAVORITES_PLAYLIST_ID
+import com.localmusic.app.data.model.RECENTLY_PLAYED_PLAYLIST_ID
 import com.localmusic.app.data.model.PlaylistWithCount
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,10 +82,16 @@ fun PlaylistsScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(playlists, key = { it.id }) { playlist ->
-                if (playlist.isBuiltIn) {
-                    FavoritesCard(playlist = playlist, onClick = { onPlaylistClick(playlist.id) })
-                } else {
-                    UserPlaylistRow(
+                when (playlist.id) {
+                    // 曲库/最近播放属于本地音乐模块，这里只展示主收藏 + 用户歌单
+                    ALL_SONGS_PLAYLIST_ID, RECENTLY_PLAYED_PLAYLIST_ID -> Unit
+                    FAVORITES_PLAYLIST_ID -> BuiltInCard(
+                        icon = Icons.Default.Favorite,
+                        title = playlist.name,
+                        subtitle = "红心收藏 · ${playlist.songCount} 首",
+                        onClick = { onPlaylistClick(playlist.id) }
+                    )
+                    else -> UserPlaylistRow(
                         playlist = playlist,
                         onClick = { onPlaylistClick(playlist.id) },
                         onDelete = { onDeletePlaylist(playlist.id) }
@@ -93,7 +103,12 @@ fun PlaylistsScreen(
 }
 
 @Composable
-private fun FavoritesCard(playlist: PlaylistWithCount, onClick: () -> Unit) {
+private fun BuiltInCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -111,14 +126,14 @@ private fun FavoritesCard(playlist: PlaylistWithCount, onClick: () -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Icon(
-                imageVector = Icons.Default.Favorite,
+                imageVector = icon,
                 contentDescription = null,
                 modifier = Modifier.size(40.dp),
                 tint = MaterialTheme.colorScheme.onPrimary
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = playlist.name,
+                    text = title,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onPrimary,
@@ -126,7 +141,7 @@ private fun FavoritesCard(playlist: PlaylistWithCount, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "全部音乐 · ${playlist.songCount} 首",
+                    text = subtitle,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
                 )
@@ -151,7 +166,7 @@ private fun UserPlaylistRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Icon(
-            imageVector = Icons.Default.QueueMusic,
+            imageVector = Icons.AutoMirrored.Filled.QueueMusic,
             contentDescription = null,
             modifier = Modifier.size(40.dp),
             tint = MaterialTheme.colorScheme.primary

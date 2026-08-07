@@ -242,10 +242,11 @@ class MigrationManager(
             )
         }
 
-        // 写入库：关联 playlist_songs
+        // 写入库：关联 playlist_songs（主收藏的歌曲走 favorite 标记，不写关联）
         var totalToInsert = matchedSongs.values.sumOf { it.size }
         var inserted = 0
         for ((plId, items) in matchedSongs) {
+            if (plId == FAVORITES_PLAYLIST_ID) continue
             val pss = items.map { (newSongId, ref) ->
                 PlaylistSong(playlistId = plId, songId = newSongId, addedAt = ref.originalId)
             }
@@ -263,7 +264,14 @@ class MigrationManager(
         }
 
         // 更新匹配歌曲的 playCount 和 favorite
-        for ((_, items) in matchedSongs) {
+        for ((plId, items) in matchedSongs) {
+            if (plId == FAVORITES_PLAYLIST_ID) {
+                // 主收藏 = 红心收藏：导入的歌曲打上 favorite 标记
+                for ((newSongId, _) in items) {
+                    songDao.updateFavorite(newSongId, true)
+                }
+                continue
+            }
             for ((newSongId, ref) in items) {
                 if (ref.playCount > 0) {
                     songDao.incrementPlayCountForImport(newSongId, ref.playCount)

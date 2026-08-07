@@ -114,6 +114,8 @@ fun CreatorFeedScreen(
 ) {
     val works by viewModel.works.collectAsState()
     val bgmLibrary by viewModel.bgmLibrary.collectAsState()
+    // 作者主页打开时：视频流与 BGM 自动暂停，关闭后恢复
+    val profileOpen by viewModel.profileOpen.collectAsState()
 
     // 空状态（用户截图要求：只留全黑背景 + 底部 CreatorBottomNav 5 格导航，上面什么都不显示）
     if (works.isEmpty()) {
@@ -224,7 +226,7 @@ fun CreatorFeedScreen(
                         if (work.mediaList.isNotEmpty()) {
                             FeedVideoPlayer(
                                 videoUri = work.mediaList.first(),
-                                isCurrentPage = isCurrentPage && !isVideoPaused,
+                                isCurrentPage = isCurrentPage && !isVideoPaused && !profileOpen,
                                 onPlayerChange = { player -> pageVideoPlayer = player }
                             )
                         }
@@ -418,10 +420,10 @@ fun CreatorFeedScreen(
         )
     }
 
-    // 播放 BGM
+    // 播放 BGM（作者主页打开时暂停）
     FeedBgmPlayer(
         bgmUri = currentBgmUri,
-        isCurrentPage = true
+        isCurrentPage = !profileOpen
     )
 
     // 评论弹窗

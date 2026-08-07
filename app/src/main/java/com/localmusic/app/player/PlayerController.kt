@@ -29,7 +29,9 @@ data class PlayerUiState(
     val queue: List<Song> = emptyList(),
     val currentIndex: Int = 0,
     val shuffleEnabled: Boolean = false,
-    val repeatMode: Int = Player.REPEAT_MODE_OFF
+    val repeatMode: Int = Player.REPEAT_MODE_OFF,
+    /** 播放倍速：1.0f = 正常，0.5f = 半速，2.0f = 二倍速。 */
+    val playbackSpeed: Float = 1.0f
 )
 
 class PlayerController(private val context: Context) {
@@ -61,8 +63,12 @@ class PlayerController(private val context: Context) {
 
     var onSongCompleted: ((Song) -> Unit)? = null
 
+    /** 每次开始播放一首新歌时触发（切歌/自动下一首都算），用于记录"最近播放"。 */
+    var onSongStarted: ((Song) -> Unit)? = null
+
     private var wasPlaying = false
     private var lastSongCompletedId: Long = -1L
+    private var lastSongStartedId: Long = -1L
 
     /**
      * 更新播放队列中某首歌的数据（改名后同步刷新）。
@@ -154,10 +160,20 @@ class PlayerController(private val context: Context) {
                     Player.EVENT_IS_PLAYING_CHANGED,
                     Player.EVENT_PLAYBACK_STATE_CHANGED,
                     Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED,
-                    Player.EVENT_REPEAT_MODE_CHANGED
+                    Player.EVENT_REPEAT_MODE_CHANGED,
+                    Player.EVENT_PLAYBACK_PARAMETERS_CHANGED
                 )
             ) {
                 syncFromPlayer()
+                // 记录最近播放：当前歌曲 id 变化且正在播放（开始播放/切歌/自动下一首）
+                if (nowPlaying) {
+                    _uiState.value.currentSong?.let { song ->
+                        if (song.id != lastSongStartedId) {
+                            lastSongStartedId = song.id
+                            onSongStarted?.invoke(song)
+                        }
+                    }
+                }
             }
         }
 
@@ -166,15 +182,33 @@ class PlayerController(private val context: Context) {
             Log.e(TAG, "播放错误: ${error.message}, song=${current?.title}, uri=${current?.uri}")
             Log.e(TAG, "错误码: ${error.errorCode}, 原因: ${error.cause?.javaClass?.simpleName}")
 
-            // 无论是否在播放，都强制停止并清空队列，防止自动跳到下一首
+            // 提供单曲异常容错：跳过出错歌曲，跳到下一首继续播放。
+            // 只有当队列里确实还有下一首时才跳过；否则停止并清空队列。
             val controller = mediaController
+            val queue = _uiState.value.queue
             if (controller != null) {
-                Log.i(TAG, "播放错误后强制 stop + clearMediaItems，不自动切歌")
+                val hasNext = queue.any { it.id != current?.id } ||
+                    controller.mediaItemCount > 1
+                if (hasNext) {
+                    Log.i(TAG, "播放错误，自动跳过该曲目，继续播放下一首")
+                    _positionMs.value = 0L
+                    // 若错误来源于当前条目本身，ExoPlayer 可能已处于 error 状态，
+                    // 通过 seekToNextMediaItem 让播放器自己处理转移
+                    try {
+                        controller.seekToNextMediaItem()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "seekToNextMediaItem 失败", e)
+                        controller.stop()
+                        controller.clearMediaItems()
+                    }
+                    _uiState.value = _uiState.value.copy(isPlaying = false)
+                    return
+                }
+                Log.i(TAG, "队列无可切换歌曲，停止播放")
                 controller.stop()
                 controller.clearMediaItems()
             }
             wasPlaying = false
-            // 通知 UI 更新：播放失败后保持 currentSong 显示（用户可见），但 isPlaying=false
             _uiState.value = _uiState.value.copy(
                 isPlaying = false,
                 currentSong = _uiState.value.currentSong
@@ -223,20 +257,9 @@ class PlayerController(private val context: Context) {
         controller.stop()
         controller.clearMediaItems()
 
-        val mediaItems = songs.map { s ->
-            MediaItem.Builder()
-                .setMediaId(s.id.toString())
-                .setUri(s.uri)
-                .setMediaMetadata(
-                    androidx.media3.common.MediaMetadata.Builder()
-                        .setTitle(s.title)
-                        .setArtist(s.artist)
-                        .setAlbumTitle(s.album)
-                        .build()
-                )
-                .build()
-        }
+        val mediaItems = songs.map { buildMediaItem(it) }
         lastSongCompletedId = -1L
+        lastSongStartedId = -1L
         controller.setMediaItems(mediaItems, startIndex.coerceIn(0, songs.lastIndex), 0L)
         controller.prepare()
         controller.play()
@@ -244,10 +267,84 @@ class PlayerController(private val context: Context) {
         syncFromPlayer()
     }
 
+    /** 由 [Song] 构造 ExoPlayer 的 [MediaItem]，URI 与元数据一并写入。 */
+    private fun buildMediaItem(song: Song): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(song.id.toString())
+            .setUri(song.uri)
+            .setMediaMetadata(
+                androidx.media3.common.MediaMetadata.Builder()
+                    .setTitle(song.title)
+                    .setArtist(song.artist)
+                    .setAlbumTitle(song.album)
+                    .build()
+            )
+            .build()
+
     fun playShuffled(songs: List<Song>) {
         if (songs.isEmpty()) return
         mediaController?.shuffleModeEnabled = true
         playSongs(songs, 0)
+    }
+
+    // ---------- 播放队列管理 ----------
+
+    /**
+     * 从播放队列中移除一首歌（不删除曲库数据）。
+     * 移除当前播放歌曲时由 ExoPlayer 自动切到下一首。
+     */
+    fun removeFromQueue(songId: Long) {
+        val controller = mediaController ?: return
+        val mediaId = songId.toString()
+        for (index in 0 until controller.mediaItemCount) {
+            if (controller.getMediaItemAt(index).mediaId == mediaId) {
+                controller.removeMediaItem(index)
+                songsByMediaId = songsByMediaId - mediaId
+                syncFromPlayer()
+                // 若队列已空则停止播放
+                if (controller.mediaItemCount == 0) {
+                    controller.stop()
+                    _uiState.value = PlayerUiState()
+                    _positionMs.value = 0L
+                }
+                return
+            }
+        }
+    }
+
+    /** 清空整个播放队列并停止播放。 */
+    fun clearQueue() {
+        val controller = mediaController ?: return
+        songsByMediaId = emptyMap()
+        controller.stop()
+        controller.clearMediaItems()
+        _uiState.value = PlayerUiState()
+        _positionMs.value = 0L
+    }
+
+    /** 将 [song] 插入到当前播放曲目之后（"下一首播放"），不打断当前播放。 */
+    fun playNextInQueue(song: Song) {
+        val controller = mediaController ?: return
+        if (controller.mediaItemCount == 0) {
+            playSongs(listOf(song), 0)
+            return
+        }
+        val insertIndex = (controller.currentMediaItemIndex + 1).coerceAtMost(controller.mediaItemCount)
+        songsByMediaId = songsByMediaId + (song.id.toString() to song)
+        controller.addMediaItem(insertIndex, buildMediaItem(song))
+        syncFromPlayer()
+    }
+
+    // ---------- 倍速播放 ----------
+
+    fun setPlaybackSpeed(speed: Float) {
+        val clamped = speed.coerceIn(0.25f, 3.0f)
+        mediaController?.setPlaybackSpeed(clamped)
+        _uiState.value = _uiState.value.copy(playbackSpeed = clamped)
+    }
+
+    fun getPlaybackSpeed(): Float {
+        return mediaController?.playbackParameters?.speed ?: _uiState.value.playbackSpeed
     }
 
     fun togglePlayPause() {
@@ -347,7 +444,7 @@ class PlayerController(private val context: Context) {
         val queue = buildQueue(controller)
         val currentIndex = controller.currentMediaItemIndex.coerceAtLeast(0)
         val currentSong = queue.getOrNull(currentIndex)
-        Log.d(TAG, "syncFromPlayer: state=${controller.playbackState}, isPlaying=${controller.isPlaying}, index=$currentIndex, song=${currentSong?.title}, error=${controller.playerError?.message}")
+        Log.d(TAG, "syncFromPlayer: state=${controller.playbackState}, isPlaying=${controller.isPlaying}, index=$currentIndex, duration=${controller.duration}, song=${currentSong?.title}, error=${controller.playerError?.message}")
         _uiState.value = PlayerUiState(
             currentSong = currentSong,
             isPlaying = controller.isPlaying,
@@ -355,7 +452,8 @@ class PlayerController(private val context: Context) {
             queue = queue,
             currentIndex = currentIndex,
             shuffleEnabled = controller.shuffleModeEnabled,
-            repeatMode = controller.repeatMode
+            repeatMode = controller.repeatMode,
+            playbackSpeed = controller.playbackParameters.speed
         )
         _positionMs.value = controller.currentPosition.coerceAtLeast(0L)
     }

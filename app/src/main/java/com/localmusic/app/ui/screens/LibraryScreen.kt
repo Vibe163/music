@@ -14,20 +14,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -46,23 +49,28 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.localmusic.app.data.importer.ImportResult
+import com.localmusic.app.data.model.ALL_SONGS_PLAYLIST_ID
 import com.localmusic.app.data.model.FAVORITES_PLAYLIST_ID
+import com.localmusic.app.data.model.RECENTLY_PLAYED_PLAYLIST_ID
 import com.localmusic.app.data.model.PlaylistWithCount
 import com.localmusic.app.data.model.Song
 import com.localmusic.app.ui.components.SongListItem
 import com.localmusic.app.ui.components.SongMenuItem
 import com.localmusic.app.ui.viewmodel.LibraryViewModel
 import com.localmusic.app.ui.viewmodel.SortMode
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,12 +78,12 @@ fun LibraryScreen(
     viewModel: LibraryViewModel,
     onSongClick: (songId: Long) -> Unit,
     onSongAddToPlaylist: (Song) -> Unit,
+    onPlayNextSong: (Song) -> Unit,
     onEditSong: (Song) -> Unit,
     onRemoveSong: (Song) -> Unit,
     onToggleFavorite: (Song) -> Unit,
     onShareSong: (Song) -> Unit,
     onPlayAll: () -> Unit,
-    onShuffleAll: () -> Unit,
     onCreatePlaylist: () -> Unit,
     onAddSongsToPlaylist: () -> Unit,
     onPickFiles: () -> Unit,
@@ -89,8 +97,27 @@ fun LibraryScreen(
     val progress by viewModel.importProgress.collectAsState()
     var showAddMenu by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
 
+    // 切换歌单时回到列表顶部（否则会停留在上一个歌单的滚动位置）
+    LaunchedEffect(uiState.currentPlaylistId) {
+        listState.scrollToItem(0)
+    }
+
+    // 定位到正在播放的歌曲：仅当当前列表包含该歌曲时显示按钮
+    val playingIndex = if (currentPlayingSongId > 0)
+        displaySongs.indexOfFirst { it.id == currentPlayingSongId }
+    else -1
+    val onLocatePlaying: (() -> Unit)? = if (playingIndex >= 0) {
+        {
+            coroutineScope.launch { listState.animateScrollToItem(playingIndex) }
+        }
+    } else null
+
+    val isLibrary = uiState.currentPlaylistId == ALL_SONGS_PLAYLIST_ID
     val isFavorites = uiState.currentPlaylistId == FAVORITES_PLAYLIST_ID
+    val isRecentlyPlayed = uiState.currentPlaylistId == RECENTLY_PLAYED_PLAYLIST_ID
 
     Scaffold(
         modifier = modifier,
@@ -98,21 +125,16 @@ fun LibraryScreen(
             TopAppBar(
                 title = { Text(uiState.currentPlaylistName) },
                 actions = {
-                    if (isFavorites) {
-                        IconButton(onClick = onCreatePlaylist) {
-                            Icon(Icons.Default.Create, contentDescription = "新建歌单")
-                        }
-                    }
-                    Box {
-                        IconButton(onClick = { showAddMenu = true }) {
-                            Icon(Icons.Default.Add, contentDescription = "添加音乐")
-                        }
-                        if (showAddMenu) {
-                            DropdownMenu(
-                                expanded = showAddMenu,
-                                onDismissRequest = { showAddMenu = false }
-                            ) {
-                                if (isFavorites) {
+                    if (isLibrary) {
+                        Box {
+                            IconButton(onClick = { showAddMenu = true }) {
+                                Icon(Icons.Default.Add, contentDescription = "添加音乐")
+                            }
+                            if (showAddMenu) {
+                                DropdownMenu(
+                                    expanded = showAddMenu,
+                                    onDismissRequest = { showAddMenu = false }
+                                ) {
                                     DropdownMenuItem(
                                         text = { Text("选择文件") },
                                         leadingIcon = { Icon(Icons.Default.MusicNote, contentDescription = null) },
@@ -129,16 +151,26 @@ fun LibraryScreen(
                                             onPickFolder()
                                         }
                                     )
-                                } else {
-                                    DropdownMenuItem(
-                                        text = { Text("添加歌曲") },
-                                        leadingIcon = { Icon(Icons.Default.MusicNote, contentDescription = null) },
-                                        onClick = {
-                                            showAddMenu = false
-                                            onAddSongsToPlaylist()
-                                        }
-                                    )
                                 }
+                            }
+                        }
+                    } else if (!isFavorites && !isRecentlyPlayed) {
+                        IconButton(onClick = { showAddMenu = true }) {
+                            Icon(Icons.Default.Add, contentDescription = "添加歌曲")
+                        }
+                        if (showAddMenu) {
+                            DropdownMenu(
+                                expanded = showAddMenu,
+                                onDismissRequest = { showAddMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("添加歌曲") },
+                                    leadingIcon = { Icon(Icons.Default.MusicNote, contentDescription = null) },
+                                    onClick = {
+                                        showAddMenu = false
+                                        onAddSongsToPlaylist()
+                                    }
+                                )
                             }
                         }
                     }
@@ -192,10 +224,11 @@ fun LibraryScreen(
 
             when {
                 displaySongs.isEmpty() && uiState.searchQuery.isBlank() -> {
-                    if (isFavorites) {
-                        EmptyLibraryState(onPickFiles = onPickFiles, onPickFolder = onPickFolder)
-                    } else {
-                        EmptyPlaylistState(
+                    when {
+                        isLibrary -> EmptyLibraryState(onPickFiles = onPickFiles, onPickFolder = onPickFolder)
+                        isFavorites -> EmptyFavoritesState()
+                        isRecentlyPlayed -> EmptyRecentlyPlayedState()
+                        else -> EmptyPlaylistState(
                             playlistName = uiState.currentPlaylistName,
                             onAddSongs = onAddSongsToPlaylist
                         )
@@ -216,15 +249,11 @@ fun LibraryScreen(
                     QuickActionsRow(
                         songCount = displaySongs.size,
                         onPlayAll = onPlayAll,
-                        onShuffleAll = onShuffleAll,
-                        onSortClick = { showSortMenu = true }
-                    )
-
-                    if (showSortMenu) {
-                        DropdownMenu(
-                            expanded = showSortMenu,
-                            onDismissRequest = { showSortMenu = false }
-                        ) {
+                        onSortClick = { showSortMenu = true },
+                        onLocatePlaying = onLocatePlaying,
+                        sortMenuExpanded = showSortMenu,
+                        onDismissSortMenu = { showSortMenu = false },
+                        sortMenuContent = {
                             DropdownMenuItem(
                                 text = { Text("按添加时间") },
                                 onClick = { viewModel.setSortMode(SortMode.DATE_ADDED); showSortMenu = false }
@@ -242,15 +271,18 @@ fun LibraryScreen(
                                 onClick = { viewModel.setSortMode(SortMode.ALBUM); showSortMenu = false }
                             )
                         }
-                    }
+                    )
 
                     SongList(
                         songs = displaySongs,
                         currentPlayingSongId = currentPlayingSongId,
+                        listState = listState,
                         onSongClick = onSongClick,
                         onEditSong = onEditSong,
                         onSongAddToPlaylist = onSongAddToPlaylist,
+                        onPlayNextSong = onPlayNextSong,
                         onRemoveSong = onRemoveSong,
+                        removeLabel = if (isFavorites) "取消收藏" else "移除",
                         onToggleFavorite = onToggleFavorite,
                         onShareSong = onShareSong
                     )
@@ -316,8 +348,11 @@ private fun PlaylistChipsRow(
 private fun QuickActionsRow(
     songCount: Int,
     onPlayAll: () -> Unit,
-    onShuffleAll: () -> Unit,
-    onSortClick: () -> Unit
+    onSortClick: () -> Unit,
+    onLocatePlaying: (() -> Unit)?,
+    sortMenuExpanded: Boolean,
+    onDismissSortMenu: () -> Unit,
+    sortMenuContent: @Composable () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -341,17 +376,29 @@ private fun QuickActionsRow(
             )
         )
         Spacer(Modifier.width(8.dp))
-        AssistChip(
-            onClick = onShuffleAll,
-            label = { Text("随机播放") },
-            leadingIcon = { Icon(Icons.Default.Shuffle, contentDescription = null) }
-        )
-        Spacer(Modifier.width(8.dp))
-        AssistChip(
-            onClick = onSortClick,
-            label = { Text("排序") },
-            leadingIcon = { Icon(Icons.Default.Sort, contentDescription = null) }
-        )
+        Box {
+            AssistChip(
+                onClick = onSortClick,
+                label = { Text("排序") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null) }
+            )
+            DropdownMenu(
+                expanded = sortMenuExpanded,
+                onDismissRequest = onDismissSortMenu
+            ) {
+                sortMenuContent()
+            }
+        }
+        if (onLocatePlaying != null) {
+            Spacer(Modifier.width(4.dp))
+            IconButton(onClick = onLocatePlaying) {
+                Icon(
+                    Icons.Default.MyLocation,
+                    contentDescription = "定位到正在播放的歌曲",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
     }
 }
 
@@ -359,14 +406,18 @@ private fun QuickActionsRow(
 private fun SongList(
     songs: List<Song>,
     currentPlayingSongId: Long,
+    listState: LazyListState,
     onSongClick: (Long) -> Unit,
     onEditSong: (Song) -> Unit,
     onSongAddToPlaylist: (Song) -> Unit,
+    onPlayNextSong: (Song) -> Unit,
     onRemoveSong: (Song) -> Unit,
+    removeLabel: String,
     onToggleFavorite: (Song) -> Unit,
     onShareSong: (Song) -> Unit
 ) {
     LazyColumn(
+        state = listState,
         contentPadding = PaddingValues(bottom = 16.dp),
         modifier = Modifier.fillMaxSize()
     ) {
@@ -380,10 +431,12 @@ private fun SongList(
             val onFavClick = { onToggleFavorite(song) }
             val menuItems = remember(song) {
                 listOf(
+                    SongMenuItem("播放") { onClick() },
+                    SongMenuItem("下一首播放") { onPlayNextSong(song) },
                     SongMenuItem("分享") { onShareSong(song) },
                     SongMenuItem("编辑信息") { onEditSong(song) },
                     SongMenuItem("添加到歌单") { onSongAddToPlaylist(song) },
-                    SongMenuItem("移除") { onRemoveSong(song) }
+                    SongMenuItem(removeLabel) { onRemoveSong(song) }
                 )
             }
             SongListItem(
@@ -465,6 +518,64 @@ private fun EmptyPlaylistState(
                 Icon(Icons.Default.Add, contentDescription = null)
                 Text("  添加歌曲")
             }
+        }
+    }
+}
+
+@Composable
+private fun EmptyRecentlyPlayedState() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.History,
+                contentDescription = null,
+                modifier = Modifier.size(72.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "还没有播放记录",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = "播放过的歌曲会自动出现在这里",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyFavoritesState() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Favorite,
+                contentDescription = null,
+                modifier = Modifier.size(72.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "还没有收藏的歌曲",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = "去曲库点亮歌曲右侧的红心即可收藏",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

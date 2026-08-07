@@ -60,7 +60,9 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
+    // material-icons 库 1.7.8 后已停更并从 Compose BOM 2024.11+ 移除，
+    // 必须显式指定版本号，否则无版本依赖会解析失败导致 Icons.* 全部 Unresolved
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
 
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-session:1.5.1")

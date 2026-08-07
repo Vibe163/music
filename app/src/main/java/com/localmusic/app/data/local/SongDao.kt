@@ -17,6 +17,26 @@ interface SongDao {
     @Query("SELECT * FROM songs ORDER BY dateAdded DESC")
     suspend fun getAll(): List<SongEntity>
 
+    /** 主收藏 = 红心歌曲（favorite = true）。 */
+    @Query("SELECT * FROM songs WHERE favorite = 1 ORDER BY dateAdded DESC")
+    fun observeFavorites(): Flow<List<SongEntity>>
+
+    /** 主收藏的静态快照（一次性查询）。 */
+    @Query("SELECT * FROM songs WHERE favorite = 1 ORDER BY dateAdded DESC")
+    suspend fun getFavorites(): List<SongEntity>
+
+    /** 最近播放（播放完成的歌曲，按最近播放时间倒序，最多 50 首）。 */
+    @Query("SELECT * FROM songs WHERE lastPlayedAt > 0 ORDER BY lastPlayedAt DESC LIMIT 50")
+    fun observeRecentlyPlayed(): Flow<List<SongEntity>>
+
+    /** 记录最近播放时间（歌曲播放完成时调用）。 */
+    @Query("UPDATE songs SET lastPlayedAt = :time WHERE id = :id")
+    suspend fun updateLastPlayed(id: Long, time: Long)
+
+    /** 从最近播放中移除（清除播放时间戳）。 */
+    @Query("UPDATE songs SET lastPlayedAt = 0 WHERE id = :id")
+    suspend fun clearRecentlyPlayed(id: Long)
+
     @Query("SELECT COUNT(*) FROM songs")
     fun observeCount(): Flow<Int>
 

@@ -14,6 +14,7 @@ import com.localmusic.app.creator.data.model.CreatorWork
 import com.localmusic.app.creator.data.storage.CreatorUserProfile
 import com.localmusic.app.creator.data.storage.UserProfileStore
 import com.localmusic.app.creator.data.storage.WorkStore
+import com.localmusic.app.data.model.ALL_SONGS_PLAYLIST_ID
 import com.localmusic.app.data.model.FAVORITES_PLAYLIST_ID
 import com.localmusic.app.data.model.PlaylistWithCount
 import com.localmusic.app.data.model.Song
@@ -60,9 +61,10 @@ class CreatorViewModel(app: Application) : AndroidViewModel(app) {
         const val FORCE_CLEAR_WORKS_ON_INIT = false
     }
 
-    private val workStore = WorkStore(app)
-    private val userProfileStore = UserProfileStore(app)
-    private val repository = (app as LocalMusicApp).repository
+    private val application = app as LocalMusicApp
+    private val workStore = application.workStore
+    private val userProfileStore = application.userProfileStore
+    private val repository = application.repository
 
     init {
         if (FORCE_CLEAR_WORKS_ON_INIT) {
@@ -82,22 +84,44 @@ class CreatorViewModel(app: Application) : AndroidViewModel(app) {
             entities.map { it.toSong() }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    /** 所有歌单（主收藏虚拟歌单 + 用户歌单），BGM 选择时先选歌单再选歌 */
+    /** 所有歌单（曲库 + 主收藏虚拟歌单 + 用户歌单），BGM 选择时先选歌单再选歌 */
     val playlists: StateFlow<List<PlaylistWithCount>> =
-        combine(repository.observePlaylists(), repository.observeSongs()) { userPlaylists, songs ->
-            // 主收藏是虚拟歌单（id=0L），不在 playlists 表里，需手动拼到列表最前
-            val favorites = PlaylistWithCount(
-                id = FAVORITES_PLAYLIST_ID,
-                name = "主收藏",
+        combine(
+            repository.observePlaylists(),
+            repository.observeSongs(),
+            repository.observeFavoriteSongs()
+        ) { userPlaylists, songs, favorites ->
+            val library = PlaylistWithCount(
+                id = ALL_SONGS_PLAYLIST_ID,
+                name = "曲库",
                 createdAt = 0L,
                 songCount = songs.size,
                 isBuiltIn = true
             )
-            listOf(favorites) + userPlaylists
+            val favoritesP = PlaylistWithCount(
+                id = FAVORITES_PLAYLIST_ID,
+                name = "主收藏",
+                createdAt = 0L,
+                songCount = favorites.size,
+                isBuiltIn = true
+            )
+            listOf(library, favoritesP) + userPlaylists
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _currentWorkIndex = MutableStateFlow(0)
     val currentWorkIndex: StateFlow<Int> = _currentWorkIndex.asStateFlow()
+
+    /** 作者主页是否打开（打开时下层视频流自动暂停，关闭后恢复播放） */
+    private val _profileOpen = MutableStateFlow(false)
+    val profileOpen: StateFlow<Boolean> = _profileOpen.asStateFlow()
+
+    /** 设置作者主页打开/关闭状态（同步视频流播放/暂停） */
+    fun setProfileOpen(open: Boolean) {
+        if (_profileOpen.value != open) {
+            _profileOpen.value = open
+            Log.i(TAG, "setProfileOpen: $open")
+        }
+    }
 
     // ========================================================================
     // 发布流程草稿状态（Step1→Step3→Step4 之间传递的中间数据）
@@ -460,13 +484,13 @@ class CreatorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 获取指定歌单的歌曲列表（BGM 选择时用）
-     *  主收藏（id=0L）是虚拟歌单，不在 playlist_songs 表里，需走 observeSongs 全量查询
+     *  曲库（-1L）/主收藏（0L）是虚拟歌单，不在 playlist_songs 表里，需走全量/红心查询
      */
     suspend fun getPlaylistSongs(playlistId: Long): List<Song> =
-        if (playlistId == FAVORITES_PLAYLIST_ID) {
-            repository.getAllSongs()
-        } else {
-            repository.getPlaylistSongs(playlistId)
+        when (playlistId) {
+            ALL_SONGS_PLAYLIST_ID -> repository.getAllSongs()
+            FAVORITES_PLAYLIST_ID -> repository.getFavoriteSongs()
+            else -> repository.getPlaylistSongs(playlistId)
         }
 }
 

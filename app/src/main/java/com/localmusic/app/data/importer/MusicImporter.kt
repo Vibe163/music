@@ -14,11 +14,13 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
-/** 导入结果统计。 */
+/** 导入结果统计，duplicateNames/failedNames 记录具体歌曲名（供导入日志展示）。 */
 data class ImportResult(
     val added: Int = 0,
     val skipped: Int = 0,
-    val failed: Int = 0
+    val failed: Int = 0,
+    val duplicateNames: List<String> = emptyList(),
+    val failedNames: List<String> = emptyList()
 )
 
 /**
@@ -49,15 +51,17 @@ class MusicImporter(
     ): ImportResult = withContext(Dispatchers.IO) {
         val total = uris.size
         var added = 0; var skipped = 0; var failed = 0
+        val duplicateNames = mutableListOf<String>()
+        val failedNames = mutableListOf<String>()
         uris.forEachIndexed { index, uri ->
             when (importSingle(uri)) {
                 ImportStatus.Added -> added++
-                ImportStatus.Skipped -> skipped++
-                ImportStatus.Failed -> failed++
+                ImportStatus.Skipped -> duplicateNames += displayName(uri)
+                ImportStatus.Failed -> failedNames += displayName(uri)
             }
             onProgress(index + 1, total)
         }
-        ImportResult(added, skipped, failed)
+        ImportResult(added, skipped, failed, duplicateNames, failedNames)
     }
 
     /** 导入一个文件夹树 Uri（OpenDocumentTree 返回的 treeUri）。 */
@@ -82,15 +86,17 @@ class MusicImporter(
         if (total == 0) return@withContext ImportResult()
 
         var added = 0; var skipped = 0; var failed = 0
+        val duplicateNames = mutableListOf<String>()
+        val failedNames = mutableListOf<String>()
         audioFiles.forEachIndexed { index, uri ->
             when (importSingle(uri, persistPermission = false)) {
                 ImportStatus.Added -> added++
-                ImportStatus.Skipped -> skipped++
-                ImportStatus.Failed -> failed++
+                ImportStatus.Skipped -> duplicateNames += displayName(uri)
+                ImportStatus.Failed -> failedNames += displayName(uri)
             }
             onProgress(index + 1, total)
         }
-        ImportResult(added, skipped, failed)
+        ImportResult(added, skipped, failed, duplicateNames, failedNames)
     }
 
     private fun collectAudioFiles(dir: DocumentFile, out: MutableList<Uri>) {
@@ -195,6 +201,16 @@ class MusicImporter(
             songDao.findByMd5(md5)?.let { return InsertResult(it.id, existed = true) }
         }
 
+        // 回退去重：早期版本导入的记录 md5 为 NULL，MD5 查不到；
+        // 用「标题 + 时长」近似匹配（同一首歌 tag 标题相同、时长几乎一致）
+        findDuplicateByTitleAndDuration(meta.title, meta.durationMs, md5)?.let { existing ->
+            // 回填 MD5，后续导入直接命中 MD5 快速去重
+            if (md5 != null) {
+                songDao.updateMd5(existing.id, md5)
+            }
+            return InsertResult(existing.id, existed = true)
+        }
+
         val newId = songDao.insert(
             SongEntity(
                 title = meta.title,
@@ -217,6 +233,27 @@ class MusicImporter(
     }
 
     private data class InsertResult(val id: Long, val existed: Boolean)
+
+    /**
+     * 回退去重：按「标题 + 时长」近似匹配库中已有记录。
+     * 早期版本（md5 字段加入前）导入的歌曲 md5 为 NULL，MD5 去重查不到它们；
+     * 同一首歌即使文件名/URI 不同，tag 标题一致、时长几乎相同，借此识别重复。
+     */
+    private suspend fun findDuplicateByTitleAndDuration(
+        title: String,
+        durationMs: Long,
+        currentMd5: String?
+    ): SongEntity? {
+        if (durationMs <= 0 || title.isBlank()) return null
+        val candidates = songDao.findByDurationRange(
+            (durationMs - 1500).coerceAtLeast(0L),
+            durationMs + 1500
+        )
+        val titleNorm = title.lowercase()
+        return candidates.firstOrNull {
+            it.md5 != currentMd5 && it.title.lowercase() == titleNorm
+        }
+    }
 
     /**
      * 将原始内嵌封面字节降采样为 thumbSize×thumbSize JPEG 缩略图。
@@ -280,6 +317,10 @@ class MusicImporter(
         val name = uri.lastPathSegment?.substringAfterLast('/') ?: "未知标题"
         return name.substringBeforeLast('.').ifBlank { "未知标题" }
     }
+
+    private fun displayName(uri: Uri): String =
+        DocumentFile.fromSingleUri(context, uri)?.name?.takeIf { it.isNotBlank() }
+            ?: fileNameWithoutExt(uri)
 
     /**
      * 从文件 URI 提取父目录的 Tree URI。

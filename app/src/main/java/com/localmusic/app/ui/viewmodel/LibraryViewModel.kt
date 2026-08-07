@@ -9,10 +9,14 @@ import com.localmusic.app.data.importer.ImportResult
 import com.localmusic.app.data.importer.MusicMetadataEditor
 import com.localmusic.app.data.migration.ImportProgress as MigrationImportProgress
 import com.localmusic.app.data.migration.ImportSummary
+import com.localmusic.app.data.model.ALL_SONGS_PLAYLIST_ID
 import com.localmusic.app.data.model.FAVORITES_PLAYLIST_ID
+import com.localmusic.app.data.model.ImportLogEntity
+import com.localmusic.app.data.model.RECENTLY_PLAYED_PLAYLIST_ID
 import com.localmusic.app.data.model.PlaylistWithCount
 import com.localmusic.app.data.model.Song
 import com.localmusic.app.data.model.toSong
+import com.localmusic.app.data.repository.DuplicateGroup
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -29,8 +33,8 @@ enum class SortMode { DATE_ADDED, TITLE, ARTIST, ALBUM }
 
 data class LibraryUiState(
     val searchQuery: String = "",
-    val currentPlaylistId: Long = FAVORITES_PLAYLIST_ID,
-    val currentPlaylistName: String = "主收藏"
+    val currentPlaylistId: Long = ALL_SONGS_PLAYLIST_ID,
+    val currentPlaylistName: String = "曲库"
 )
 
 data class ImportProgress(
@@ -53,32 +57,76 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     private val _importProgress = MutableStateFlow(ImportProgress())
     val importProgress: StateFlow<ImportProgress> = _importProgress.asStateFlow()
 
+    /** 导入日志（按时间倒序）。 */
+    val importLogs: StateFlow<List<ImportLogEntity>> = repository.observeImportLogs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** 重复歌曲分组（扫描结果）。 */
+    private val _duplicateGroups = MutableStateFlow<List<DuplicateGroup>>(emptyList())
+    val duplicateGroups: StateFlow<List<DuplicateGroup>> = _duplicateGroups.asStateFlow()
+
+    /** 重复扫描进行中。 */
+    private val _duplicateScanning = MutableStateFlow(false)
+    val duplicateScanning: StateFlow<Boolean> = _duplicateScanning.asStateFlow()
+
+    /** 扫描进度（processed, total）。 */
+    private val _scanProgress = MutableStateFlow(0 to 0)
+    val scanProgress: StateFlow<Pair<Int, Int>> = _scanProgress.asStateFlow()
+
+    /** 上次扫描中无法读取（URI 失效）的歌曲数。 */
+    private val _lastScanUnreadable = MutableStateFlow(0)
+    val lastScanUnreadable: StateFlow<Int> = _lastScanUnreadable.asStateFlow()
+
     val playlists: StateFlow<List<PlaylistWithCount>> = combine(
         repository.observePlaylists(),
-        repository.observeSongs()
-    ) { userPlaylists, songs ->
-        val favorites = PlaylistWithCount(
-            id = FAVORITES_PLAYLIST_ID,
-            name = "主收藏",
+        repository.observeSongs(),
+        repository.observeFavoriteSongs(),
+        repository.observeRecentlyPlayedSongs()
+    ) { userPlaylists, songs, favorites, recentlyPlayed ->
+        val library = PlaylistWithCount(
+            id = ALL_SONGS_PLAYLIST_ID,
+            name = "曲库",
             createdAt = 0L,
             songCount = songs.size,
             isBuiltIn = true
         )
-        listOf(favorites) + userPlaylists
+        val recent = PlaylistWithCount(
+            id = RECENTLY_PLAYED_PLAYLIST_ID,
+            name = "最近播放",
+            createdAt = 0L,
+            songCount = recentlyPlayed.size,
+            isBuiltIn = true
+        )
+        val favoritesP = PlaylistWithCount(
+            id = FAVORITES_PLAYLIST_ID,
+            name = "主收藏",
+            createdAt = 0L,
+            songCount = favorites.size,
+            isBuiltIn = true
+        )
+        listOf(library, recent, favoritesP) + userPlaylists
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val userPlaylists: StateFlow<List<PlaylistWithCount>> = repository.observePlaylists()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** 全部曲库歌曲（供"添加到歌单"弹窗等使用，与当前选中歌单无关）。 */
+    val librarySongs: StateFlow<List<Song>> = repository.observeSongs()
+        .map { list -> list.map { it.toSong() } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val currentPlaylistSongs: StateFlow<List<Song>> = _uiState
         .map { it.currentPlaylistId }
         .flatMapLatest { playlistId ->
-            if (playlistId == FAVORITES_PLAYLIST_ID) {
-                repository.observeSongs()
+            when (playlistId) {
+                ALL_SONGS_PLAYLIST_ID -> repository.observeSongs()
                     .map { list -> list.map { it.toSong() } }
-            } else {
-                repository.observePlaylistSongIds(playlistId).combine(
+                RECENTLY_PLAYED_PLAYLIST_ID -> repository.observeRecentlyPlayedSongs()
+                    .map { list -> list.map { it.toSong() } }
+                FAVORITES_PLAYLIST_ID -> repository.observeFavoriteSongs()
+                    .map { list -> list.map { it.toSong() } }
+                else -> repository.observePlaylistSongIds(playlistId).combine(
                     repository.observeSongs()
                 ) { songIds, allEntities ->
                     val songMap = allEntities.associateBy { it.id }
@@ -115,7 +163,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 playlists,
                 _uiState.map { it.currentPlaylistId }
             ) { lists, currentId ->
-                lists.firstOrNull { it.id == currentId }?.name ?: "主收藏"
+                lists.firstOrNull { it.id == currentId }?.name ?: "曲库"
             }.collect { name ->
                 if (name != _uiState.value.currentPlaylistName) {
                     _uiState.value = _uiState.value.copy(currentPlaylistName = name)
@@ -146,6 +194,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             val result = repository.importFromUris(uris) { processed, total ->
                 _importProgress.value = _importProgress.value.copy(processed = processed, total = total)
             }
+            repository.recordImportLog(result)
             _importProgress.value = ImportProgress(running = false, lastResult = result)
         }
     }
@@ -156,6 +205,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             val result = repository.importFromTree(treeUri) { processed, total ->
                 _importProgress.value = _importProgress.value.copy(processed = processed, total = total)
             }
+            repository.recordImportLog(result)
             _importProgress.value = ImportProgress(running = false, lastResult = result)
         }
     }
@@ -187,7 +237,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             repository.deletePlaylist(playlistId)
             if (_uiState.value.currentPlaylistId == playlistId) {
-                _uiState.value = _uiState.value.copy(currentPlaylistId = FAVORITES_PLAYLIST_ID)
+                _uiState.value = _uiState.value.copy(currentPlaylistId = ALL_SONGS_PLAYLIST_ID)
             }
         }
     }
@@ -207,10 +257,11 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     fun removeSongFromCurrentPlaylist(songId: Long) {
         val playlistId = _uiState.value.currentPlaylistId
         viewModelScope.launch {
-            if (playlistId == FAVORITES_PLAYLIST_ID) {
-                repository.deleteSong(songId)
-            } else {
-                repository.removeSongFromPlaylist(playlistId, songId)
+            when (playlistId) {
+                FAVORITES_PLAYLIST_ID -> repository.toggleFavorite(songId, false)
+                RECENTLY_PLAYED_PLAYLIST_ID -> repository.clearRecentlyPlayed(songId)
+                ALL_SONGS_PLAYLIST_ID -> repository.deleteSong(songId)
+                else -> repository.removeSongFromPlaylist(playlistId, songId)
             }
         }
     }
@@ -228,6 +279,50 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 onRefreshed?.invoke(refreshed)
             }
         }
+    }
+
+    /** 标记为最近播放（播放完成时调用）。 */
+    fun markRecentlyPlayed(songId: Long) {
+        viewModelScope.launch {
+            repository.markRecentlyPlayed(songId)
+        }
+    }
+
+    /** 清理曲库重复歌曲，回调返回删除数量。 */
+    fun removeDuplicates(onDone: (Int) -> Unit = {}) {
+        viewModelScope.launch {
+            onDone(repository.findAndRemoveDuplicates())
+        }
+    }
+
+    /** 扫描曲库重复歌曲（MD5 内容 / 文件名 / 标题+时长 三通道），结果写入 [duplicateGroups]，并通过 [onDone] 返回重复数量。 */
+    fun checkDuplicates(onDone: (Int) -> Unit = {}) {
+        viewModelScope.launch {
+            _duplicateScanning.value = true
+            _duplicateGroups.value = emptyList()
+            _scanProgress.value = 0 to 0
+            val result = repository.findDuplicateGroupsExact { processed, total ->
+                _scanProgress.value = processed to total
+            }
+            _duplicateGroups.value = result.groups
+            _lastScanUnreadable.value = result.unreadableCount
+            _duplicateScanning.value = false
+            onDone(result.groups.sumOf { it.duplicates.size })
+        }
+    }
+
+    /** 删除重复歌曲：deleteFiles = true 时连磁盘文件一起删。 */
+    fun removeDuplicateGroups(deleteFiles: Boolean, onDone: (Int) -> Unit = {}) {
+        viewModelScope.launch {
+            val ids = _duplicateGroups.value.flatMap { it.duplicates.map { d -> d.song.id } }
+            val removed = repository.removeDuplicateSongs(ids, deleteFiles)
+            _duplicateGroups.value = emptyList()
+            onDone(removed)
+        }
+    }
+
+    fun clearDuplicateGroups() {
+        _duplicateGroups.value = emptyList()
     }
 
     fun toggleFavorite(songId: Long, favorite: Boolean, onRefreshed: ((Song) -> Unit)? = null) {

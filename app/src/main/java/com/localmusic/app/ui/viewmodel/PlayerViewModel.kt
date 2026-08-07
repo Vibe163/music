@@ -126,6 +126,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun previousOrRestart() = playerController.previousOrRestart()
     fun setVolume(volume: Float) = playerController.setVolume(volume)
     fun getVolume() = playerController.getVolume()
+    fun setPlaybackSpeed(speed: Float) = playerController.setPlaybackSpeed(speed)
+    fun removeFromQueue(songId: Long) = playerController.removeFromQueue(songId)
+    fun playNextInQueue(song: Song) = playerController.playNextInQueue(song)
+    fun clearQueue() = playerController.clearQueue()
     fun startSleepTimer(minutes: Long) {
         playerController.startSleepTimer(minutes * 60_000L, viewModelScope)
     }
@@ -134,6 +138,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     /** 设置歌曲播放完成回调——由 MainActivity 注入，用于递增播放次数等。 */
     fun setOnSongCompletedListener(listener: ((Song) -> Unit)?) {
         playerController.onSongCompleted = listener
+    }
+
+    /** 设置歌曲开始播放回调——由 MainActivity 注入，用于记录最近播放。 */
+    fun setOnSongStartedListener(listener: ((Song) -> Unit)?) {
+        playerController.onSongStarted = listener
     }
 
     /** 数据库侧 playCount/favorite 更新后，同步到播放器内存，保证 NowPlaying/队列页立即可见。 */
